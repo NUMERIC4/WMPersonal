@@ -1,0 +1,94 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0d0f14;
+  color: #e0e0e0;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 14px;
+}
+
+header {
+  padding: 16px 24px;
+  background: #151821;
+  border-bottom: 1px solid #2a2d3a;
+}
+header h1 { color: #c8a96e; font-size: 1.4rem; }
+header p  { color: #666; font-size: 0.8rem; }
+
+.layout {
+  display: flex;
+  height: calc(100vh - 61px);
+}
+
+aside {
+  width: 260px;
+  border-right: 1px solid #2a2d3a;
+  display: flex;
+  flex-direction: column;
+  background: #12141a;
+}
+
+aside input {
+  margin: 12px;
+  padding: 8px 12px;
+  background: #1c1f2b;
+  border: 1px solid #2a2d3a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  outline: none;
+}
+aside input:focus { border-color: #c8a96e; }
+
+aside ul {
+  overflow-y: auto;
+  flex: 1;
+  list-style: none;
+}
+aside ul li {
+  padding: 9px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid #1a1d26;
+  transition: background 0.15s;
+}
+aside ul li:hover  { background: #1e2130; }
+aside ul li.active { background: #252a3a; color: #c8a96e; }
+
+main {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.hint { color: #555; margin-top: 40px; text-align: center; }
+
+main h2   { color: #c8a96e; font-size: 1.2rem; margin-bottom: 4px; }
+main code { color: #666; font-size: 0.75rem; }
+
+.snapshot {
+  display: flex;
+  gap: 16px;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+.stat {
+  background: #1c1f2b;
+  border: 1px solid #2a2d3a;
+  border-radius: 8px;
+  padding: 14px 20px;
+  min-width: 130px;
+}
+.stat span     { display: block; color: #666; font-size: 0.75rem; margin-bottom: 4px; }
+.stat strong   { color: #c8a96e; font-size: 1.1rem; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+th, td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #1e2130;
+}
+th { color: #666; font-weight: normal; font-size: 0.75rem; }
+tr:hover td { background: #1a1d26; }
