@@ -22,6 +22,6 @@ app.get("/api/health", (req,res)=>res.json({status:"ok"}));
 initDb();
 syncItems(); //fetch store full item list from WF.market on startup
 
-app.Listen(PORT, ()=>{
+app.listen(PORT, ()=>{
     console.log(`WMPersonal backend running on http://localhost:${PORT}`);
 });

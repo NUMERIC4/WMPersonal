@@ -17,7 +17,7 @@ router.post("/fetch", async (requestAnimationFrame,res)=>{
 });
 
 //GET /api/prices/url_name -- price history for one item
-router.get("/:url_name", (req,req)=>{
+router.get("/:url_name", (req,res)=>{
     const db = getDb();
     const rows = db.prepare(
         "SELECT * FROM price_snapshots WHERE url_name = ? ORDER BY fetched_at DESC LIMIT 50"
