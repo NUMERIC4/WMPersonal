@@ -10,7 +10,8 @@ export function initDb() {
     "  id        TEXT PRIMARY KEY," +
     "  url_name  TEXT NOT NULL," +
     "  item_name TEXT NOT NULL," +
-    "  thumb     TEXT" +
+    "  thumb     TEXT," +
+    "  max_rank  INTEGER" +
     ");"
   );
 
@@ -27,6 +28,25 @@ export function initDb() {
   );
 
   db.exec(
+    "CREATE TABLE IF NOT EXISTS item_statistics (" +
+    "  id           INTEGER PRIMARY KEY AUTOINCREMENT," +
+    "  url_name     TEXT NOT NULL," +
+    "  rank         INTEGER," +
+    "  period       TEXT NOT NULL," +
+    "  datetime     TEXT NOT NULL," +
+    "  volume       INTEGER," +
+    "  min_price    REAL," +
+    "  max_price    REAL," +
+    "  avg_price    REAL," +
+    "  median       REAL," +
+    "  moving_avg   REAL," +
+    "  wa_price     REAL," +
+    "  fetched_at   TEXT DEFAULT (datetime('now'))," +
+    "  UNIQUE(url_name, rank, period, datetime)" +
+    ");"
+  );
+
+  db.exec(
     "CREATE TABLE IF NOT EXISTS groups (" +
     "  id   INTEGER PRIMARY KEY AUTOINCREMENT," +
     "  name TEXT NOT NULL UNIQUE" +
@@ -35,16 +55,48 @@ export function initDb() {
 
   db.exec(
     "CREATE TABLE IF NOT EXISTS group_items (" +
-    "  group_id INTEGER REFERENCES groups(id)," +
+    "  group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE," +
     "  url_name TEXT NOT NULL," +
     "  PRIMARY KEY (group_id, url_name)" +
     ");"
   );
 
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS favourite_users (" +
+    "  slug       TEXT PRIMARY KEY," +
+    "  added_at   TEXT DEFAULT (datetime('now'))" +
+    ");"
+  );
+
+  // Migrations
+  try { db.exec("ALTER TABLE items ADD COLUMN max_rank INTEGER"); } catch (_) {}
+
+  seedGroups();
   console.log("Database ready.");
   return db;
 }
 
-export function getDb() {
-  return db;
+// Seed predefined item groups based on naming patterns
+function seedGroups() {
+  const groups = [
+    "Arcanes",
+    "Mods",
+    "Primed Mods",
+    "Primary Sets",
+    "Primary Parts",
+    "Secondary Sets",
+    "Secondary Parts",
+    "Melee Sets",
+    "Melee Parts",
+    "Warframe Sets",
+    "Warframe Parts",
+    "Necramech Mods",
+    "Relics",
+  ];
+
+  const insert = db.prepare("INSERT OR IGNORE INTO groups (name) VALUES (?)");
+  const tx = db.transaction(() => { for (const g of groups) insert.run(g); });
+  tx();
 }
+
+export function getDb() { return db; }

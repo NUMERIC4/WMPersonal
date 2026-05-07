@@ -13,3 +13,18 @@ export const getPriceHistory = (url_name) =>
 
 export const getUserOrders = (slug) =>
   axios.get(`${BASE}/users/${slug}/orders`).then(r => r.data);
+
+export const getFavourites = () =>
+  axios.get(`${BASE}/favourites`).then(r => r.data);
+
+export const addFavourite = (slug) =>
+  axios.post(`${BASE}/favourites`, { slug }).then(r => r.data);
+
+export const removeFavourite = (slug) =>
+  axios.delete(`${BASE}/favourites/${slug}`).then(r => r.data);
+
+export const getFavouriteOrders = (slug) =>
+  axios.get(`${BASE}/favourites/${slug}/orders`).then(r => r.data);
+
+export const refreshFavourites = () =>
+  axios.post(`${BASE}/favourites/refresh`).then(r => r.data);
