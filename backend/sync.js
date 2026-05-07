@@ -1,13 +1,13 @@
 import { queueFetch } from "./queue.js";
 import { getDb } from "./db.js";
 
-const BASE = "https://api.warframe.market/v1";
+const BASE = "https://api.warframe.market/v2";
 
 export async function syncItems() {
   console.log("Syncing item list from warframe.market...");
   try {
     const data = await queueFetch(`${BASE}/items`);
-    const items = data.payload.items;
+    const items = data.payload.items.en ?? data.payload.items;
     const db = getDb();
 
     const insert = db.prepare(

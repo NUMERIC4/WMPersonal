@@ -1,3 +1,6 @@
+import "dotenv/config";
+import { fetch } from "undici";
+
 const INTERVAL_MS = 340;
 const queue = [];
 let running = false;
@@ -8,17 +11,25 @@ function processQueue() {
 
   const { url, resolve, reject } = queue.shift();
 
-  fetch(url, {
-    headers: {
-      "Language":   "en",
-      "Platform":   "pc",
-      "Accept":     "application/json",
-      "User-Agent": "WMPersonal/1.0 (personal monitor tool)",
-    },
-  })
+  const headers = {
+    "accept":          "application/json, text/plain, */*",
+    "accept-language": "en-US,en;q=0.9",
+    "language":        "en",
+    "platform":        "pc",
+    "user-agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "referer":         "https://warframe.market/",
+    "origin":          "https://warframe.market",
+  };
+
+  if (process.env.WFM_JWT) {
+    headers["Authorization"] = process.env.WFM_JWT;
+  }
+
+  fetch(url, { headers })
     .then(async (res) => {
-      if (!res.ok) throw new Error(`HTTP error! status: ${res.status} for ${url}`);
-      resolve(await res.json());
+      const text = await res.text();
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+      resolve(JSON.parse(text));
     })
     .catch(reject)
     .finally(() => {
