@@ -92,3 +92,31 @@ th, td {
 }
 th { color: #666; font-weight: normal; font-size: 0.75rem; }
 tr:hover td { background: #1a1d26; }
+
+/* Tabs */
+.tabs { margin-top: 10px; display: flex; gap: 8px; }
+.tabs button {
+  background: #1c1f2b; border: 1px solid #2a2d3a;
+  color: #888; padding: 6px 16px; border-radius: 6px; cursor: pointer;
+}
+.tabs button.active { border-color: #c8a96e; color: #c8a96e; }
+
+/* User page */
+.user-page { padding: 24px; }
+.user-search { display: flex; gap: 10px; margin-bottom: 24px; }
+.user-search input {
+  flex: 1; padding: 8px 12px; background: #1c1f2b;
+  border: 1px solid #2a2d3a; border-radius: 6px; color: #e0e0e0;
+}
+.user-search input:focus { border-color: #c8a96e; outline: none; }
+.user-search button {
+  padding: 8px 20px; background: #c8a96e; border: none;
+  border-radius: 6px; color: #0d0f14; font-weight: bold; cursor: pointer;
+}
+.user-search button:hover { background: #d4b87a; }
+
+.order-columns { display: flex; gap: 24px; flex-wrap: wrap; }
+.order-columns > div { flex: 1; min-width: 280px; }
+.col-title { font-size: 0.85rem; margin-bottom: 8px; }
+.col-title.sell { color: #e07070; }
+.col-title.buy  { color: #70b870; }
