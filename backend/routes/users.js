@@ -11,14 +11,14 @@ router.get("/:slug/orders", async (req, res) => {
     const json = await queueFetch(`https://api.warframe.market/v2/orders/user/${slug}`);
     const orders = json.data ?? [];
 
-    // Cross-reference item names from local DB
     const db = getDb();
     const enriched = orders.map((o) => {
-      const row = db.prepare("SELECT item_name FROM items WHERE url_name = ?").get(o.item?.slug ?? "");
+      // v2 orders only give itemId, look it up in local DB by id
+      const row = db.prepare("SELECT item_name, url_name FROM items WHERE id = ?").get(o.itemId ?? "");
       return {
         id:         o.id,
-        item_slug:  o.item?.slug ?? "",
-        item_name:  row?.item_name ?? o.item?.slug ?? "Unknown",
+        item_slug:  row?.url_name ?? "",
+        item_name:  row?.item_name ?? "Unknown",
         order_type: o.type,
         platinum:   o.platinum,
         quantity:   o.quantity,

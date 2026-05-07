@@ -120,3 +120,11 @@ tr:hover td { background: #1a1d26; }
 .col-title { font-size: 0.85rem; margin-bottom: 8px; }
 .col-title.sell { color: #e07070; }
 .col-title.buy  { color: #70b870; }
+
+.item-link {
+  color: #c8a96e;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.item-link:hover { color: #d4b87a; }

@@ -46,6 +46,22 @@ export default function App() {
     setLoadingPrice(false);
   }
 
+  function handleOrderItemClick(order) {
+    if (!order.item_slug) return;
+    setTab("market");
+    setSearch(order.item_name);
+    // pre-select the item directly
+    setSelected({ id: order.item_slug, url_name: order.item_slug, item_name: order.item_name });
+    setSnapshot(null);
+    setHistory([]);
+    fetchPrice(order.item_slug)
+      .then(snap => setSnapshot(snap.snapshot))
+      .catch(console.error);
+    getPriceHistory(order.item_slug)
+      .then(setHistory)
+      .catch(console.error);
+  }
+
   async function handleUserSearch() {
     if (!userInput.trim()) return;
     setUserSlug(userInput.trim());
@@ -167,7 +183,11 @@ export default function App() {
                     <tbody>
                       {sells.map(o => (
                         <tr key={o.id}>
-                          <td>{o.item_name}</td>
+                          <td>
+                            <span className="item-link" onClick={() => handleOrderItemClick(o)}>
+                              {o.item_name}
+                            </span>
+                          </td>
                           <td>{o.platinum} pt</td>
                           <td>{o.quantity}</td>
                         </tr>
@@ -182,7 +202,11 @@ export default function App() {
                     <tbody>
                       {buys.map(o => (
                         <tr key={o.id}>
-                          <td>{o.item_name}</td>
+                          <td>
+                            <span className="item-link" onClick={() => handleOrderItemClick(o)}>
+                              {o.item_name}
+                            </span>
+                          </td>
                           <td>{o.platinum} pt</td>
                           <td>{o.quantity}</td>
                         </tr>
