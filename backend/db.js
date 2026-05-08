@@ -76,27 +76,19 @@ export function initDb() {
   return db;
 }
 
-// Seed predefined item groups based on naming patterns
 function seedGroups() {
   const groups = [
-    "Arcanes",
-    "Mods",
-    "Primed Mods",
-    "Primary Sets",
-    "Primary Parts",
-    "Secondary Sets",
-    "Secondary Parts",
-    "Melee Sets",
-    "Melee Parts",
-    "Warframe Sets",
-    "Warframe Parts",
-    "Necramech Mods",
-    "Relics",
+    "Arcanes", "Mods", "Primed Mods",
+    "Primary Sets", "Primary Parts",
+    "Secondary Sets", "Secondary Parts",
+    "Melee Sets", "Melee Parts",
+    "Warframe Sets", "Warframe Parts",
+    "Necramech Mods", "Relics",
   ];
-
   const insert = db.prepare("INSERT OR IGNORE INTO groups (name) VALUES (?)");
-  const tx = db.transaction(() => { for (const g of groups) insert.run(g); });
-  tx();
+  db.transaction(() => { for (const g of groups) insert.run(g); })();
 }
 
-export function getDb() { return db; }
+export function getDb() {
+  return db;
+}

@@ -8,6 +8,9 @@ import itemsRouter      from "./routes/items.js";
 import pricesRouter     from "./routes/prices.js";
 import usersRouter      from "./routes/users.js";
 import favouritesRouter from "./routes/favourites.js";
+import statsRouter      from "./routes/stats.js";
+import scannerRouter    from "./routes/scanner.js";
+import profitRouter     from "./routes/profit.js";
 
 const app = express();
 const PORT = 3001;
@@ -19,6 +22,9 @@ app.use("/api/items",      itemsRouter);
 app.use("/api/prices",     pricesRouter);
 app.use("/api/users",      usersRouter);
 app.use("/api/favourites", favouritesRouter);
+app.use("/api/stats",      statsRouter);
+app.use("/api/scanner",    scannerRouter);
+app.use("/api/profit",     profitRouter);
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 

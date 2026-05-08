@@ -28,3 +28,15 @@ export const getFavouriteOrders = (slug) =>
 
 export const refreshFavourites = () =>
   axios.post(`${BASE}/favourites/refresh`).then(r => r.data);
+
+export const getStats = (url_name, period = "48h", rank = null) =>
+  axios.get(`${BASE}/stats/${url_name}`, { params: { period, rank } }).then(r => r.data);
+
+export const getStatsSummary = (url_name) =>
+  axios.get(`${BASE}/stats/${url_name}/summary`).then(r => r.data);
+
+export const getScannerGroups = () =>
+  axios.get(`${BASE}/scanner/groups`).then(r => r.data);
+
+export const cancelScan = () =>
+  axios.post(`${BASE}/scanner/cancel`).then(r => r.data);
