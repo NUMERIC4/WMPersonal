@@ -5,9 +5,26 @@ import { getDb } from "../db.js";
 const router = Router();
 const V1 = "https://api.warframe.market/v1";
 const HEADERS = { "Accept": "application/json", "Language": "en", "Platform": "pc" };
+const DEFAULT_MAX_AGE_MINUTES = 30;
+
+function hasFreshStats(url_name, maxAgeMinutes = DEFAULT_MAX_AGE_MINUTES) {
+  const db = getDb();
+  const row = db.prepare(
+    "SELECT MAX(fetched_at) as last FROM item_statistics WHERE url_name = ?"
+  ).get(url_name);
+
+  if (!row?.last) return false;
+  const last = new Date(`${row.last}Z`).getTime();
+  return Number.isFinite(last) && Date.now() - last < maxAgeMinutes * 60 * 1000;
+}
 
 // Fetch + store statistics for one item from v1 API
-export async function fetchAndStoreStats(url_name) {
+export async function fetchAndStoreStats(url_name, options = {}) {
+  const maxAgeMinutes = options.maxAgeMinutes ?? DEFAULT_MAX_AGE_MINUTES;
+  if (!options.force && hasFreshStats(url_name, maxAgeMinutes)) {
+    return { cached: true };
+  }
+
   const res  = await fetch(`${V1}/items/${url_name}/statistics`, { headers: HEADERS });
   if (!res.ok) throw new Error(`Stats HTTP ${res.status} for ${url_name}`);
   const json = await res.json();
@@ -52,10 +69,10 @@ router.get("/:url_name", async (req, res) => {
   const { url_name } = req.params;
   const period = req.query.period ?? "48h";
   const rank   = req.query.rank !== undefined ? Number(req.query.rank) : null;
+  const force  = req.query.force === "true";
 
   try {
-    // Always refresh from API
-    await fetchAndStoreStats(url_name);
+    await fetchAndStoreStats(url_name, { force });
 
     const db = getDb();
     let rows;
@@ -78,7 +95,7 @@ router.get("/:url_name", async (req, res) => {
 router.get("/:url_name/summary", async (req, res) => {
   const { url_name } = req.params;
   try {
-    await fetchAndStoreStats(url_name);
+    await fetchAndStoreStats(url_name, { force: req.query.force === "true" });
     const db = getDb();
 
     // Get top buy + sell orders (online only, from v2 top endpoint)

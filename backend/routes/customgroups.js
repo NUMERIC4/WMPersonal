@@ -414,7 +414,7 @@ router.get("/", (req, res) => {
       "WHERE cgi.group_id = ? ORDER BY i.item_name"
     ).all(g.id);
     return { ...g, items };
-  }).filter(g => g.items.length > 0);
+  });
   res.json(result);
 });
 

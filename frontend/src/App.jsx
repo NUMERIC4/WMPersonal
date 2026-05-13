@@ -1,17 +1,19 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import {
   getItems, fetchPrice, getPriceHistory, getUserOrders,
   getFavourites, addFavourite, removeFavourite,
-  getFavouriteOrders, refreshFavourites,
+  getFavouriteOrders, refreshFavourites, API_BASE,
   getStats, getScannerGroups, cancelScan, getTimeAnalysis,
+  getScannerItems, cancelProfit, cancelTimeAnalysis,
+  syncMarketItems,
   getCustomGroups, createCustomGroup, deleteCustomGroup,
   renameCustomGroup, addItemToGroup, removeItemFromGroup,
 } from "./api";
 import "./App.css";
 
-const BASE = "http://localhost:3001/api";
+const BASE = API_BASE;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function rankLabel(rank, maxRank) {
@@ -26,102 +28,13 @@ function InfoPopup({ title, children, onClose }) {
       <div className="popup-box" onClick={e => e.stopPropagation()}>
         <div className="popup-header">
           <h3>{title}</h3>
-          <button className="popup-close" onClick={onClose}>✕</button>
+          <button className="popup-close" onClick={onClose}>x</button>
         </div>
         <div className="popup-body">{children}</div>
       </div>
-      {/* ── GROUP MANAGER ── */}
-      {tab==="groups"&&(
-        <div className="gm-layout">
-          {/* Left — group list */}
-          <div className="gm-sidebar">
-            <h3 className="section-label" style={{marginBottom:10}}>My Groups</h3>
-            <div className="gm-new-group">
-              <input placeholder="New group name…" value={newGroupName}
-                onChange={e=>setNewGroupName(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&handleCreateGroup()}/>
-              <button className="refresh-btn" style={{whiteSpace:"nowrap"}} onClick={handleCreateGroup}>+ Create</button>
-            </div>
-            {customGroups.length===0&&<p className="hint">No custom groups yet.</p>}
-            {customGroups.map(g=>(
-              <div key={g.id} className={`gm-group-item ${activeGMGroup?.id===g.id?"active":""}`}
-                onClick={()=>{ setActiveGMGroup(g); setGmSearch(""); }}>
-                {renamingGroup===g.id ? (
-                  <input className="gm-new-group" style={{flex:1,margin:0}}
-                    value={renameVal} autoFocus
-                    onChange={e=>setRenameVal(e.target.value)}
-                    onKeyDown={e=>{ if(e.key==="Enter") handleRenameGroup(g.id); if(e.key==="Escape") setRenamingGroup(null); }}
-                    onClick={e=>e.stopPropagation()}/>
-                ) : (
-                  <>
-                    <span className="gm-group-name">{g.name}</span>
-                    <span className="gm-group-count">{g.items.length} items</span>
-                  </>
-                )}
-                <div className="gm-group-actions" onClick={e=>e.stopPropagation()}>
-                  <button className="gm-btn-sm rename" onClick={()=>{ setRenamingGroup(g.id); setRenameVal(g.name); }}>✎</button>
-                  <button className="gm-btn-sm" onClick={()=>handleDeleteGroup(g.id)}>✕</button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Right — group editor */}
-          <div className="gm-main">
-            {!activeGMGroup&&<p className="hint">Select or create a group on the left.</p>}
-            {activeGMGroup&&(
-              <>
-                <h2 className="user-title" style={{marginBottom:12}}>
-                  {activeGMGroup.name}
-                  <span style={{color:"#555",fontWeight:"normal",fontSize:"0.85rem",marginLeft:10}}>
-                    {activeGMGroup.items.length} items
-                  </span>
-                </h2>
-
-                {/* Current members */}
-                <div className="gm-members" style={{marginBottom:16}}>
-                  <h3 className="section-label" style={{marginBottom:6}}>Members</h3>
-                  {activeGMGroup.items.length===0&&<p className="hint" style={{fontSize:"0.8rem"}}>No items yet — search below to add.</p>}
-                  <div>
-                    {activeGMGroup.items.map(item=>(
-                      <span key={item.url_name} className="gm-member-chip">
-                        {item.item_name}
-                        <button onClick={()=>handleRemoveFromGroup(item.url_name)}>✕</button>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Add items */}
-                <h3 className="section-label" style={{marginBottom:6}}>Add Items</h3>
-                <input className="gm-item-search user-search"
-                  style={{width:"100%",padding:"8px 12px",background:"#1c1f2b",border:"1px solid #2a2d3a",borderRadius:"6px",color:"#e0e0e0",marginBottom:8}}
-                  placeholder="Search items to add…" value={gmSearch}
-                  onChange={e=>setGmSearch(e.target.value)}/>
-                <div className="gm-item-list">
-                  {gmItems.map(item=>{
-                    const already = activeGMGroup.items.some(i=>i.url_name===item.url_name);
-                    return(
-                      <div key={item.url_name} className="gm-item-row">
-                        <span>{item.item_name}</span>
-                        {already
-                          ? <button className="gm-item-remove" onClick={()=>handleRemoveFromGroup(item.url_name)}>Remove</button>
-                          : <button className="gm-item-add"    onClick={()=>handleAddToGroup(item.url_name)}>+ Add</button>
-                        }
-                      </div>
-                    );
-                  })}
-                  {gmSearch&&gmItems.length===0&&<p className="hint" style={{fontSize:"0.8rem"}}>No items found.</p>}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-
 // ── Order Table ───────────────────────────────────────────────────────────────
 function OrderTable({ orders, onItemClick, showLive = false }) {
   const [sortKey, setSortKey]     = useState("item_name");
@@ -322,10 +235,9 @@ function StatsPanel({ urlName }) {
 
 // ── Group Selector (btn86 style) ──────────────────────────────────────────────
 function GroupSelector({ groups, selected, onSelect, groupStats = {}, customGroups = [] }) {
-  // Separate built-in, NPC (emoji prefix), and custom (★ prefix)
-  const builtin = Object.entries(groups).filter(([k]) => !k.startsWith("★") && !k.match(/^[⚔📚🔬🩸🌿💰🌙🏛🦷☠]/));
-  const npc     = Object.entries(groups).filter(([k]) =>  k.match(/^[⚔📚🔬🩸🌿💰🌙🏛🦷☠]/));
-  const custom  = Object.entries(groups).filter(([k]) =>  k.startsWith("★"));
+  const builtin = Object.entries(groups).filter(([k]) => !k.startsWith("Custom: ") && !k.startsWith("NPC: "));
+  const npc     = Object.entries(groups).filter(([k]) =>  k.startsWith("NPC: "));
+  const custom  = Object.entries(groups).filter(([k]) =>  k.startsWith("Custom: "));
 
   function Btn({ g, count }) {
     const s    = groupStats[g];
@@ -409,6 +321,9 @@ export default function App() {
   const [viewGroup,    setViewGroup]    = useState(null);
   const [lastGroup,    setLastGroup]    = useState(null);
   const scanEsRef = useRef(null);
+  const [syncingGroups, setSyncingGroups] = useState(false);
+  const [scanSort, setScanSort] = useState("item");
+  const [scanDir, setScanDir] = useState("asc");
 
   // Profit
   const [profitGroup,    setProfitGroup]    = useState("Arcanes");
@@ -570,6 +485,28 @@ export default function App() {
     setScanRunning(false);
   }
 
+  function toggleScanSort(k) {
+    if (scanSort === k) setScanDir(d => d === "asc" ? "desc" : "asc");
+    else {
+      setScanSort(k);
+      setScanDir(k === "item" ? "asc" : "desc");
+    }
+  }
+
+  async function handleSyncGroups() {
+    if (syncingGroups || scanRunning || profitRunning || taRunning) return;
+    setSyncingGroups(true);
+    try {
+      await syncMarketItems();
+      const groups = await getScannerGroups();
+      setScanGroups(groups);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSyncingGroups(false);
+    }
+  }
+
   // ── Profit SSE ────────────────────────────────────────────────────────────
   function startProfit() {
     if (profitRunning) return;
@@ -582,9 +519,19 @@ export default function App() {
       const msg = JSON.parse(e.data);
       if (msg.type==="start")    { setProfitProgress({done:0,total:msg.total}); }
       if (msg.type==="progress") { setProfitProgress({done:msg.done,total:msg.total}); }
-      if (msg.type==="done")     { setProfitResults(msg.profiles??[]); setProfitRunning(false); es.close(); }
+      if (msg.type==="done" || msg.type==="cancelled") {
+        setProfitResults(msg.profiles??[]);
+        setProfitRunning(false);
+        es.close();
+      }
     };
     es.onerror = () => { setProfitRunning(false); es.close(); };
+  }
+
+  function stopProfit() {
+    cancelProfit();
+    if (profitEsRef.current) profitEsRef.current.close();
+    setProfitRunning(false);
   }
 
   function toggleProfitSort(k) {
@@ -598,60 +545,54 @@ export default function App() {
   });
 
   // ── Time Analysis SSE ─────────────────────────────────────────────────────
-  function startTimeAnalysis() {
+  async function startTimeAnalysis() {
     if (taRunning) return;
     setTaRunning(true); setTaProgress(null); setTaResults([]); setTaSelected(null);
 
-    // Get items for the selected group from scanner groups
-    const url = `${BASE}/timeanalysis/batch`;
-    fetch(`${BASE}/scanner/groups`).then(r=>r.json()).then(groups => {
-      // Get actual item slugs for this group via scanner
-      return fetch(`${BASE}/scanner/run?group=${encodeURIComponent(taGroup)}&dry=true`);
-    });
-
-    // Use SSE from scanner to get slugs, then batch timeanalysis
-    const slugsEs = new EventSource(`${BASE}/scanner/run?group=${encodeURIComponent(taGroup)}`);
-    const slugs = [];
-    taEsRef.current = slugsEs;
-
-    slugsEs.onmessage = async (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type==="start")    { setTaProgress({done:0,total:msg.total}); }
-      if (msg.type==="progress") {
-        setTaProgress({done:msg.done,total:msg.total});
-        if (msg.snap?.url_name) slugs.push(msg.snap.url_name);
-      }
-      if (msg.type==="done") {
-        slugsEs.close();
-        // Now run batch time analysis
-        const res = await fetch(`${BASE}/timeanalysis/batch`, {
-          method: "POST",
-          headers: { "Content-Type":"application/json" },
-          body: JSON.stringify({
-            url_names:  slugs,
-            minVolume:  taFilters.minVolume,
-            maxPrice:   taFilters.maxPrice,
-          })
-        });
-        const reader = res.body.getReader();
-        const dec    = new TextDecoder();
-        let buf = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value);
-          const lines = buf.split("\n\n");
-          buf = lines.pop();
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const m = JSON.parse(line.slice(5).trim());
-            if (m.type==="progress") setTaProgress({done:m.done,total:m.total});
-            if (m.type==="done") { setTaResults(m.results??[]); setTaRunning(false); }
+    try {
+      const items = await getScannerItems(taGroup);
+      const controller = new AbortController();
+      taEsRef.current = controller;
+      const res = await fetch(`${BASE}/timeanalysis/batch`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          url_names:  items.map(item => item.url_name),
+          minVolume:  taFilters.minVolume,
+          maxPrice:   taFilters.maxPrice,
+        })
+      });
+      const reader = res.body.getReader();
+      const dec    = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value);
+        const lines = buf.split("\n\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const m = JSON.parse(line.slice(5).trim());
+          if (m.type==="start") setTaProgress({done:0,total:m.total});
+          if (m.type==="progress") setTaProgress({done:m.done,total:m.total});
+          if (m.type==="done" || m.type==="cancelled") {
+            setTaResults(m.results??[]);
+            setTaRunning(false);
           }
         }
       }
-    };
-    slugsEs.onerror = () => { setTaRunning(false); slugsEs.close(); };
+    } catch (e) {
+      if (e.name !== "AbortError") console.error(e);
+      setTaRunning(false);
+    }
+  }
+
+  function stopTimeAnalysis() {
+    cancelTimeAnalysis();
+    if (taEsRef.current?.abort) taEsRef.current.abort();
+    setTaRunning(false);
   }
 
   // ── Group Manager ─────────────────────────────────────────────────────────
@@ -710,7 +651,18 @@ export default function App() {
     return <th className={`sortable ${a?"sorted":""}`} onClick={()=>toggleProfitSort(k)}>{label}{a?(profitDir==="asc"?" ▲":" ▼"):""}</th>;
   }
 
-  const viewResults = viewGroup ? (groupResults[viewGroup]??[]) : [];
+  const viewResults = viewGroup ? [...(groupResults[viewGroup]??[])].sort((a,b) => {
+    const av = scanSort === "item" ? (a.item ?? "").toLowerCase() : (a[scanSort] ?? -1);
+    const bv = scanSort === "item" ? (b.item ?? "").toLowerCase() : (b[scanSort] ?? -1);
+    if (av < bv) return scanDir === "asc" ? -1 : 1;
+    if (av > bv) return scanDir === "asc" ? 1 : -1;
+    return 0;
+  }) : [];
+
+  function ScanSortTh({ label, k }) {
+    const active = scanSort === k;
+    return <th className={`sortable ${active?"sorted":""}`} onClick={()=>toggleScanSort(k)}>{label}{active?(scanDir==="asc"?" ▲":" ▼"):""}</th>;
+  }
 
   return (
     <div className="app">
@@ -856,6 +808,9 @@ export default function App() {
             <div className="scan-header">
               <h2 className="user-title">{scanGroup}</h2>
               <div className="scan-controls">
+                <button className="refresh-btn" onClick={handleSyncGroups} disabled={syncingGroups || scanRunning || profitRunning || taRunning}>
+                  {syncingGroups?"Updating...":"Update Items / Groups"}
+                </button>
                 <button className="refresh-btn" onClick={startScan} disabled={scanRunning}>
                   {scanRunning?"Scanning…":"▶ Start Scan"}
                 </button>
@@ -887,7 +842,15 @@ export default function App() {
                 </h3>
                 <div className="order-section">
                   <table>
-                    <thead><tr><th>Item</th><th>Min</th><th>Avg</th><th>Max</th><th>Vol</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <ScanSortTh label="Item" k="item"/>
+                        <ScanSortTh label="Min" k="min"/>
+                        <ScanSortTh label="Avg" k="avg"/>
+                        <ScanSortTh label="Max" k="max"/>
+                        <ScanSortTh label="Vol" k="volume"/>
+                      </tr>
+                    </thead>
                     <tbody>
                       {viewResults.map((r,i)=>(
                         <tr key={i}>
@@ -920,6 +883,7 @@ export default function App() {
             <button className="refresh-btn" onClick={startProfit} disabled={profitRunning}>
               {profitRunning?"Analyzing…":"▶ Analyze"}
             </button>
+            {profitRunning&&<button className="cancel-btn" onClick={stopProfit}>Cancel</button>}
           </div>
           {profitProgress&&(
             <div className="progress-wrap">
@@ -983,6 +947,88 @@ export default function App() {
         </div>
       )}
 
+      {/* Group Manager */}
+      {tab==="groups"&&(
+        <div className="gm-layout">
+          <div className="gm-sidebar">
+            <h3 className="section-label" style={{marginBottom:10}}>My Groups</h3>
+            <div className="gm-new-group">
+              <input placeholder="New group name..." value={newGroupName}
+                onChange={e=>setNewGroupName(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&handleCreateGroup()}/>
+              <button className="refresh-btn" style={{whiteSpace:"nowrap"}} onClick={handleCreateGroup}>+ Create</button>
+            </div>
+            {customGroups.length===0&&<p className="hint">No custom groups yet.</p>}
+            {customGroups.map(g=>(
+              <div key={g.id} className={`gm-group-item ${activeGMGroup?.id===g.id?"active":""}`}
+                onClick={()=>{ setActiveGMGroup(g); setGmSearch(""); }}>
+                {renamingGroup===g.id ? (
+                  <input className="gm-new-group" style={{flex:1,margin:0}}
+                    value={renameVal} autoFocus
+                    onChange={e=>setRenameVal(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==="Enter") handleRenameGroup(g.id); if(e.key==="Escape") setRenamingGroup(null); }}
+                    onClick={e=>e.stopPropagation()}/>
+                ) : (
+                  <>
+                    <span className="gm-group-name">{g.name}</span>
+                    <span className="gm-group-count">{g.items.length} items</span>
+                  </>
+                )}
+                <div className="gm-group-actions" onClick={e=>e.stopPropagation()}>
+                  <button className="gm-btn-sm rename" onClick={()=>{ setRenamingGroup(g.id); setRenameVal(g.name); }}>Edit</button>
+                  <button className="gm-btn-sm" onClick={()=>handleDeleteGroup(g.id)}>x</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="gm-main">
+            {!activeGMGroup&&<p className="hint">Select or create a group on the left.</p>}
+            {activeGMGroup&&(
+              <>
+                <h2 className="user-title" style={{marginBottom:12}}>
+                  {activeGMGroup.name}
+                  <span style={{color:"#555",fontWeight:"normal",fontSize:"0.85rem",marginLeft:10}}>
+                    {activeGMGroup.items.length} items
+                  </span>
+                </h2>
+                <div className="gm-members" style={{marginBottom:16}}>
+                  <h3 className="section-label" style={{marginBottom:6}}>Members</h3>
+                  {activeGMGroup.items.length===0&&<p className="hint" style={{fontSize:"0.8rem"}}>No items yet - search below to add.</p>}
+                  <div>
+                    {activeGMGroup.items.map(item=>(
+                      <span key={item.url_name} className="gm-member-chip">
+                        {item.item_name}
+                        <button onClick={()=>handleRemoveFromGroup(item.url_name)}>x</button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <h3 className="section-label" style={{marginBottom:6}}>Add Items</h3>
+                <input className="gm-item-search user-search"
+                  style={{width:"100%",padding:"8px 12px",background:"#1c1f2b",border:"1px solid #2a2d3a",borderRadius:"6px",color:"#e0e0e0",marginBottom:8}}
+                  placeholder="Search items to add..." value={gmSearch}
+                  onChange={e=>setGmSearch(e.target.value)}/>
+                <div className="gm-item-list">
+                  {gmItems.map(item=>{
+                    const already = activeGMGroup.items.some(i=>i.url_name===item.url_name);
+                    return(
+                      <div key={item.url_name} className="gm-item-row">
+                        <span>{item.item_name}</span>
+                        {already
+                          ? <button className="gm-item-remove" onClick={()=>handleRemoveFromGroup(item.url_name)}>Remove</button>
+                          : <button className="gm-item-add" onClick={()=>handleAddToGroup(item.url_name)}>+ Add</button>
+                        }
+                      </div>
+                    );
+                  })}
+                  {gmSearch&&gmItems.length===0&&<p className="hint" style={{fontSize:"0.8rem"}}>No items found.</p>}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {/* ── TIME ANALYSIS ── */}
       {tab==="timeanalysis"&&(
         <div className="user-page">
@@ -1010,6 +1056,7 @@ export default function App() {
             <button className="refresh-btn" onClick={startTimeAnalysis} disabled={taRunning}>
               {taRunning?"Analyzing…":"▶ Run Analysis"}
             </button>
+            {taRunning&&<button className="cancel-btn" onClick={stopTimeAnalysis}>Cancel</button>}
           </div>
 
           {taProgress&&(
@@ -1094,3 +1141,6 @@ export default function App() {
     </div>
   );
 }
+
+
+

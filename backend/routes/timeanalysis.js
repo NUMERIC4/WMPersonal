@@ -3,6 +3,7 @@ import { getDb } from "../db.js";
 import { fetchAndStoreStats } from "./stats.js";
 
 const router = Router();
+let cancelFlag = false;
 
 // Aggregate statistics by hour-of-day and day-of-week
 function aggregateByTime(rows) {
@@ -68,6 +69,7 @@ router.get("/:url_name", async (req, res) => {
 // Body: { url_names: [...], minVolume: 5, minMargin: 20, maxPrice: 500 }
 router.post("/batch", async (req, res) => {
   const { url_names = [], minVolume = 0, minMargin = 0, maxPrice = 99999 } = req.body;
+  cancelFlag = false;
 
   res.setHeader("Content-Type",  "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -83,6 +85,12 @@ router.post("/batch", async (req, res) => {
   send({ type: "start", total: url_names.length });
 
   for (const url_name of url_names) {
+    if (cancelFlag) {
+      send({ type: "cancelled", results });
+      res.end();
+      return;
+    }
+
     try {
       await fetchAndStoreStats(url_name);
       const rows = db.prepare(
@@ -134,6 +142,11 @@ router.post("/batch", async (req, res) => {
   results.sort((a,b) => b.totalVol48h - a.totalVol48h);
   send({ type: "done", results });
   res.end();
+});
+
+router.post("/cancel", (req, res) => {
+  cancelFlag = true;
+  res.json({ cancelled: true });
 });
 
 export default router;

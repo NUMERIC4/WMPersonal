@@ -39,5 +39,5 @@ function isMod(n) {
 }
 
 function isPart(n) {
-  return ["blueprint","barrel","stock","receiver","blade","handle","head","link","neuroptics","chassis","systems","carapace","cerebrum","harness"].some(k => n.includes(k));
+  return ["blueprint","barrel","stock","receiver","blade","handle","hilt","head","link","neuroptics","chassis","systems","carapace","cerebrum","harness"].some(k => n.includes(k));
 }

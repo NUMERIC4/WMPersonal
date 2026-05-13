@@ -2,10 +2,11 @@ import { Router } from "express";
 import { getDb } from "../db.js";
 import { queueFetch } from "../queue.js";
 import { fetchAndStoreStats } from "./stats.js";
-import { classifyItem } from "../classify.js";
+import { getItemsForGroup } from "../groups.js";
 
 const router = Router();
 const V2 = "https://api.warframe.market/v2";
+let cancelFlag = false;
 
 // Fetch full orders for an item — goes through the rate-limited queue
 async function getFullOrders(url_name) {
@@ -59,6 +60,7 @@ function buildProfile(url_name, item_name, rank, maxRank, orders, stats90) {
 router.get("/scan", async (req, res) => {
   const group = req.query.group ?? "Arcanes";
   const limit = Math.min(parseInt(req.query.limit ?? "50"), 200);
+  cancelFlag = false;
 
   res.setHeader("Content-Type",  "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -67,15 +69,7 @@ router.get("/scan", async (req, res) => {
 
   function send(data) { res.write(`data: ${JSON.stringify(data)}\n\n`); }
 
-  const db = getDb();
-
-  let allItems = db.prepare("SELECT item_name, url_name, max_rank FROM items").all();
-
-  if (group !== "All Items") {
-    allItems = allItems.filter(i => classifyItem(i.item_name, i.url_name) === group);
-  }
-
-  const items = allItems.slice(0, limit);
+  const items = getItemsForGroup(group).slice(0, limit);
   const total = items.length;
   send({ type: "start", total, group });
 
@@ -83,6 +77,12 @@ router.get("/scan", async (req, res) => {
   let done = 0;
 
   for (const item of items) {
+    if (cancelFlag) {
+      send({ type: "cancelled", profiles });
+      res.end();
+      return;
+    }
+
     try {
       // Fetch stats and orders in parallel
       const [_, orders] = await Promise.all([
@@ -112,6 +112,11 @@ router.get("/scan", async (req, res) => {
   profiles.sort((a, b) => b.score - a.score);
   send({ type: "done", profiles });
   res.end();
+});
+
+router.post("/cancel", (req, res) => {
+  cancelFlag = true;
+  res.json({ cancelled: true });
 });
 
 export default router;
