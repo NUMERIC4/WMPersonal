@@ -1,21 +1,20 @@
 import { Router } from "express";
-import { fetch } from "undici";
 import { getDb } from "../db.js";
+import { queueFetch } from "../queue.js";
 import { fetchAndStoreStats } from "./stats.js";
+import { classifyItem } from "../classify.js";
 
 const router = Router();
 const V2 = "https://api.warframe.market/v2";
-const HEADERS = { "Accept": "application/json", "Language": "en", "Platform": "pc" };
 
-// Delay helper to respect rate limit
-const delay = ms => new Promise(r => setTimeout(r, ms));
-
-// Fetch full orders for an item (all statuses)
+// Fetch full orders for an item — goes through the rate-limited queue
 async function getFullOrders(url_name) {
-  const res = await fetch(`${V2}/orders/item/${url_name}`, { headers: HEADERS });
-  if (!res.ok) return [];
-  const json = await res.json();
-  return json.data ?? [];
+  try {
+    const json = await queueFetch(`${V2}/orders/item/${url_name}`);
+    return json.data ?? [];
+  } catch (_) {
+    return [];
+  }
 }
 
 // Build profit profile for a single item+rank combo
@@ -70,23 +69,10 @@ router.get("/scan", async (req, res) => {
 
   const db = getDb();
 
-  // Get items in group using same classifier as scanner
-  const { classifyItem } = await import("./scanner.js").catch(() => ({ classifyItem: () => null }));
   let allItems = db.prepare("SELECT item_name, url_name, max_rank FROM items").all();
 
   if (group !== "All Items") {
-    allItems = allItems.filter(i => {
-      const n = i.item_name.toLowerCase(), u = i.url_name.toLowerCase();
-      // inline classify to avoid circular import issues
-      if (group === "Arcanes"       && (n.startsWith("arcane ") || n.includes("arcane_"))) return true;
-      if (group === "Primed Mods"   && n.startsWith("primed "))  return true;
-      if (group === "Necramech Mods"&& n.startsWith("necramech ")) return true;
-      if (group === "Relics"        && n.includes("relic"))       return true;
-      if (group === "Primary Sets"  && u.includes("_set") && !["aklex","akjagara","twin","viper"].some(k=>n.includes(k))) return true;
-      if (group === "Secondary Sets"&& u.includes("_set") && ["aklex","akjagara","twin","viper","pistol"].some(k=>n.includes(k))) return true;
-      if (group === "Melee Sets"    && u.includes("_set") && ["sword","blade","axe","hammer","nikana","bo "].some(k=>n.includes(k))) return true;
-      return false;
-    });
+    allItems = allItems.filter(i => classifyItem(i.item_name, i.url_name) === group);
   }
 
   const items = allItems.slice(0, limit);
@@ -103,7 +89,6 @@ router.get("/scan", async (req, res) => {
         fetchAndStoreStats(item.url_name).catch(() => {}),
         getFullOrders(item.url_name),
       ]);
-      await delay(340); // respect rate limit
 
       const ranks = [...new Set(orders.map(o => o.rank ?? null))];
       const db2 = getDb();

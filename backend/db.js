@@ -68,6 +68,21 @@ export function initDb() {
     ");"
   );
 
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS custom_groups (" +
+    "  id   INTEGER PRIMARY KEY AUTOINCREMENT," +
+    "  name TEXT NOT NULL UNIQUE" +
+    ");"
+  );
+
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS custom_group_items (" +
+    "  group_id INTEGER REFERENCES custom_groups(id) ON DELETE CASCADE," +
+    "  url_name TEXT NOT NULL," +
+    "  PRIMARY KEY (group_id, url_name)" +
+    ");"
+  );
+
   // Migrations
   try { db.exec("ALTER TABLE items ADD COLUMN max_rank INTEGER"); } catch (_) {}
 

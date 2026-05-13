@@ -50,7 +50,7 @@ function isPart(n) {
 
 let cancelFlag = false;
 
-// GET /api/scanner/groups — list groups with item counts
+// GET /api/scanner/groups — list groups with item counts (built-in + custom + NPC)
 router.get("/groups", (req, res) => {
   const db = getDb();
   const items = db.prepare("SELECT item_name, url_name FROM items").all();
@@ -61,6 +61,33 @@ router.get("/groups", (req, res) => {
     if (g) counts[g] = (counts[g] ?? 0) + 1;
   }
   counts["All Items"] = items.length;
+
+  // Add custom groups (non-empty only)
+  const customGroups = db.prepare(
+    "SELECT cg.id, cg.name, COUNT(cgi.url_name) as cnt " +
+    "FROM custom_groups cg " +
+    "LEFT JOIN custom_group_items cgi ON cgi.group_id = cg.id " +
+    "GROUP BY cg.id HAVING cnt > 0"
+  ).all();
+  for (const g of customGroups) counts[`★ ${g.name}`] = g.cnt;
+
+  // Add NPC/syndicate groups
+  const SYNDICATE_PATTERNS = {
+    "⚔ Steel Meridian":    ["vaykor","morgha","shrapnel rounds"],
+    "📚 Arbiters of Hexis": ["telos","sancti"],
+    "🔬 Cephalon Suda":     ["synoid"],
+    "🩸 Red Veil":          ["rakta","sacrificial"],
+    "🌿 New Loka":          ["locust","new loka"],
+    "💰 Perrin Sequence":   ["secura"],
+    "🌙 Nightwave":         ["wolf","nora"],
+    "🏛 Entrati":           ["necramech","entrati"],
+    "🦷 Quills / Arcanes":  ["arcane "],
+    "☠ Necraloid":         ["latrox","necraloid"],
+  };
+  for (const [label, keywords] of Object.entries(SYNDICATE_PATTERNS)) {
+    const c = items.filter(i => keywords.some(k => i.item_name.toLowerCase().includes(k))).length;
+    if (c > 0) counts[label] = c;
+  }
 
   res.json(counts);
 });
@@ -90,7 +117,33 @@ router.get("/run", async (req, res) => {
   let items = db.prepare("SELECT item_name, url_name FROM items").all();
 
   // Filter by group
-  if (group !== "All Items") {
+  if (group === "All Items") {
+    // keep all
+  } else if (group.startsWith("★ ")) {
+    // Custom group
+    const name = group.slice(2);
+    const g = db.prepare("SELECT id FROM custom_groups WHERE name = ?").get(name);
+    if (g) {
+      const slugs = db.prepare("SELECT url_name FROM custom_group_items WHERE group_id = ?").all(g.id).map(r => r.url_name);
+      items = items.filter(i => slugs.includes(i.url_name));
+    } else items = [];
+  } else if (group.match(/^[⚔📚🔬🩸🌿💰🌙🏛🦷☠]/)) {
+    // NPC/syndicate group — filter by keyword
+    const KEYWORDS = {
+      "⚔ Steel Meridian":    ["vaykor","morgha","shrapnel rounds"],
+      "📚 Arbiters of Hexis": ["telos","sancti"],
+      "🔬 Cephalon Suda":     ["synoid"],
+      "🩸 Red Veil":          ["rakta","sacrificial"],
+      "🌿 New Loka":          ["locust","new loka"],
+      "💰 Perrin Sequence":   ["secura"],
+      "🌙 Nightwave":         ["wolf","nora"],
+      "🏛 Entrati":           ["necramech","entrati"],
+      "🦷 Quills / Arcanes":  ["arcane "],
+      "☠ Necraloid":         ["latrox","necraloid"],
+    };
+    const kws = KEYWORDS[group] ?? [];
+    items = items.filter(i => kws.some(k => i.item_name.toLowerCase().includes(k)));
+  } else {
     items = items.filter(i => classifyItem(i.item_name, i.url_name) === group);
   }
 
