@@ -1,0 +1,330 @@
+# JavaScript Guide — WMPersonal Edition
+
+Concepts you actually encounter in this project, with playgrounds to try them.
+
+---
+
+## 1. async / await
+
+The most important pattern in this project. Almost every backend function is async because it waits for network or DB responses.
+
+```javascript
+// BAD — this doesn't wait for the fetch to finish
+function getItems() {
+  const result = fetch("https://api.warframe.market/v2/items");
+  console.log(result); // logs Promise { <pending> }, not data!
+}
+
+// GOOD — await pauses until the fetch resolves
+async function getItems() {
+  const result = await fetch("https://api.warframe.market/v2/items");
+  const json = await result.json();
+  console.log(json.data.length); // logs actual item count
+}
+```
+
+**Playground:** paste this in your browser console and run it:
+```javascript
+async function test() {
+  const r = await fetch("https://api.warframe.market/v2/items");
+  const j = await r.json();
+  console.log("Items:", j.data.length);
+}
+test();
+```
+
+**Trap:** forgetting `await` is the #1 bug. If something logs `Promise { pending }` instead of data, you forgot `await`.
+
+---
+
+## 2. try / catch
+
+Always wrap async calls in try/catch. If the network fails or the server returns garbage, your app will crash without it.
+
+```javascript
+// BAD — will crash if fetch fails
+async function getPrice(slug) {
+  const r = await fetch(`/v2/orders/item/${slug}/top`);
+  return await r.json();
+}
+
+// GOOD
+async function getPrice(slug) {
+  try {
+    const r = await fetch(`/v2/orders/item/${slug}/top`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } catch (err) {
+    console.error("Failed:", err.message);
+    return null; // return safe fallback
+  }
+}
+```
+
+**Rule:** every function that does a network call or DB query gets a try/catch.
+
+---
+
+## 3. Array methods — map, filter, sort
+
+These are used everywhere in this project.
+
+```javascript
+const orders = [
+  { type: "sell", platinum: 50, user: { status: "ingame" } },
+  { type: "buy",  platinum: 40, user: { status: "ingame" } },
+  { type: "sell", platinum: 30, user: { status: "offline" } },
+];
+
+// filter — keep only online sellers
+const onlineSells = orders.filter(o =>
+  o.type === "sell" && o.user.status === "ingame"
+);
+// → [{ type: "sell", platinum: 50, ... }]
+
+// map — extract just the prices
+const prices = onlineSells.map(o => o.platinum);
+// → [50]
+
+// sort — ascending
+prices.sort((a, b) => a - b);
+// → [30, 50] (if both were included)
+```
+
+**Trap:** `sort()` without a comparator sorts as strings — `[10, 9, 2].sort()` gives `[10, 2, 9]`. Always use `(a, b) => a - b`.
+
+---
+
+## 4. Destructuring
+
+Used constantly in route handlers and React components.
+
+```javascript
+// Object destructuring
+const { url_name, platinum, quantity } = order;
+// same as:
+const url_name = order.url_name;
+const platinum = order.platinum;
+
+// Array destructuring
+const [first, second] = prices;
+
+// In function parameters
+function handleOrder({ url_name, platinum }) {
+  console.log(url_name, platinum);
+}
+
+// With defaults
+const { rank = 0, maxRank = 5 } = order;
+```
+
+---
+
+## 5. Optional chaining (?.) and nullish coalescing (??)
+
+These prevent crashes when data might be missing — very common when dealing with API responses.
+
+```javascript
+const order = { item: { slug: "ash_prime_set" }, rank: null };
+
+// BAD — crashes if item is undefined
+const slug = order.item.slug;
+
+// GOOD — returns undefined instead of crashing
+const slug = order?.item?.slug;
+
+// ?? — use fallback if null or undefined (NOT for 0 or "")
+const rank = order.rank ?? "unranked"; // → "unranked" (rank is null)
+const plat = order.platinum ?? 0;      // → 0 if missing
+
+// Difference from ||:
+const rank2 = order.rank || "unranked"; // → "unranked" even if rank is 0!
+// Use ?? when 0 or "" are valid values
+```
+
+---
+
+## 6. Spread operator (...)
+
+Used for copying and merging objects and arrays.
+
+```javascript
+// Copy an array without mutating original
+const prices = [50, 30, 70];
+const sorted = [...prices].sort((a, b) => a - b);
+// prices is still [50, 30, 70], sorted is [30, 50, 70]
+
+// Merge objects
+const base = { item: "ash", platinum: 50 };
+const extra = { rank: 5, visible: true };
+const merged = { ...base, ...extra };
+// → { item: "ash", platinum: 50, rank: 5, visible: true }
+
+// In React — add a property to existing state object
+setSelected(prev => ({ ...prev, rank: 5 }));
+```
+
+---
+
+## 7. Express route patterns
+
+```javascript
+// Route params — :slug is a variable in the URL
+router.get("/:slug/orders", (req, res) => {
+  const slug = req.params.slug; // "ash_prime_set" from /ash_prime_set/orders
+});
+
+// Query params — ?search=ash&limit=10
+router.get("/", (req, res) => {
+  const search = req.query.search; // "ash"
+  const limit  = req.query.limit;  // "10" (always a string!)
+});
+
+// Request body — from POST with JSON
+router.post("/fetch", (req, res) => {
+  const { url_name } = req.body; // needs express.json() middleware
+});
+
+// Always send a response
+router.get("/", (req, res) => {
+  res.json({ data: [] });      // 200 OK with JSON
+  res.status(400).json({ error: "bad request" }); // error
+});
+```
+
+**Trap:** if you forget to call `res.json()` or `res.send()`, the browser hangs forever waiting for a response.
+
+---
+
+## 8. SQLite patterns (better-sqlite3)
+
+```javascript
+// SELECT — returns array
+const items = db.prepare("SELECT * FROM items WHERE item_name LIKE ?").all("%ash%");
+
+// SELECT one row
+const item = db.prepare("SELECT * FROM items WHERE url_name = ?").get("ash_prime_set");
+// returns undefined if not found, not null
+
+// INSERT
+db.prepare("INSERT INTO items (id, url_name) VALUES (?, ?)").run("abc123", "ash_set");
+
+// Transaction — wrap multiple inserts for speed
+const insert = db.prepare("INSERT OR REPLACE INTO items VALUES (?, ?, ?)");
+const tx = db.transaction((rows) => {
+  for (const row of rows) insert.run(row.id, row.url_name, row.name);
+});
+tx(itemsArray); // 100x faster than individual inserts
+```
+
+**Trap:** better-sqlite3 is synchronous (no await needed). Don't add `await` to DB calls — it won't work.
+
+---
+
+## 9. React useState and useEffect
+
+```javascript
+// useState — hold and update values
+const [items, setItems] = useState([]);   // initial value is []
+const [count, setCount] = useState(0);
+
+// Update state (triggers re-render)
+setItems([...items, newItem]);
+setCount(c => c + 1); // functional update — safer for counters
+
+// useEffect — run code when something changes
+useEffect(() => {
+  // runs when `search` changes
+  getItems(search).then(setItems);
+}, [search]); // dependency array
+
+// Empty dependency = run once on mount
+useEffect(() => {
+  getFavourites().then(setFavs);
+}, []);
+
+// Cleanup — cancel timers, close connections
+useEffect(() => {
+  const timer = setTimeout(() => doSearch(search), 300);
+  return () => clearTimeout(timer); // cleanup runs before next effect
+}, [search]);
+```
+
+**Trap:** putting a function inside the dependency array causes infinite loops. Define it outside useEffect or use useCallback.
+
+---
+
+## 10. SSE (Server-Sent Events)
+
+Used in Scanner and Profit tabs for live progress. This is a one-way stream from server to browser.
+
+**Backend — send events:**
+```javascript
+router.get("/run", (req, res) => {
+  res.setHeader("Content-Type",  "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.flushHeaders();
+
+  // Send a message
+  res.write(`data: ${JSON.stringify({ done: 1, total: 10 })}\n\n`);
+  // Note: MUST end with \n\n
+
+  // Close when done
+  res.end();
+});
+```
+
+**Frontend — receive events:**
+```javascript
+const es = new EventSource("http://localhost:3001/api/scanner/run");
+
+es.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  console.log(msg.done, "/", msg.total);
+};
+
+es.onerror = () => es.close(); // always close on error
+```
+
+**Trap:** SSE connections stay open. Always call `es.close()` when done, or you'll leak connections.
+
+---
+
+## 11. Common traps summary
+
+| Trap | Solution |
+|---|---|
+| Forgot `await` → gets `Promise` instead of data | Add `await` before every async call |
+| `sort()` without comparator → sorts as strings | Always use `.sort((a,b) => a-b)` |
+| `\|\|` instead of `??` → treats 0 as falsy | Use `??` when 0 is a valid value |
+| No `try/catch` → app crashes on network error | Wrap all fetch/DB calls |
+| Mutating state directly → React doesn't re-render | Always use `setState(...)`, never `state.push(...)` |
+| No `res.json()` in Express route → browser hangs | Every route must send a response |
+| Adding function to useEffect deps → infinite loop | Move function outside or use useCallback |
+| better-sqlite3 with `await` → doesn't work | It's synchronous — no await needed |
+
+---
+
+## Playground ideas to try in browser console
+
+```javascript
+// 1. Fetch live WM data
+const r = await fetch("https://api.warframe.market/v2/orders/item/ash_prime_set/top", {
+  headers: { Accept: "application/json", Language: "en", Platform: "pc" }
+});
+const j = await r.json();
+console.log("Sells:", j.data.sell.map(o => o.platinum));
+
+// 2. Array practice
+const prices = [50, 30, 70, 20, 60];
+const above40 = prices.filter(p => p > 40);
+const doubled = above40.map(p => p * 2);
+const sorted  = [...doubled].sort((a, b) => a - b);
+console.log(sorted); // [100, 120, 140]
+
+// 3. Optional chaining practice
+const user = { profile: { name: "METZ4H", rank: 30 } };
+console.log(user?.profile?.name);     // "METZ4H"
+console.log(user?.inventory?.items);  // undefined (no crash)
+console.log(user?.inventory?.items ?? []); // []
+```
