@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import {
   getItems, fetchPrice, getPriceHistory, getUserOrders,
   getFavourites, addFavourite, removeFavourite,
   getFavouriteOrders, refreshFavourites,
   getStats, getScannerGroups, cancelScan, getTimeAnalysis,
+  getCustomGroups, createCustomGroup, deleteCustomGroup,
+  renameCustomGroup, addItemToGroup, removeItemFromGroup,
 } from "./api";
 import "./App.css";
 
@@ -27,6 +30,94 @@ function InfoPopup({ title, children, onClose }) {
         </div>
         <div className="popup-body">{children}</div>
       </div>
+      {/* ── GROUP MANAGER ── */}
+      {tab==="groups"&&(
+        <div className="gm-layout">
+          {/* Left — group list */}
+          <div className="gm-sidebar">
+            <h3 className="section-label" style={{marginBottom:10}}>My Groups</h3>
+            <div className="gm-new-group">
+              <input placeholder="New group name…" value={newGroupName}
+                onChange={e=>setNewGroupName(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&handleCreateGroup()}/>
+              <button className="refresh-btn" style={{whiteSpace:"nowrap"}} onClick={handleCreateGroup}>+ Create</button>
+            </div>
+            {customGroups.length===0&&<p className="hint">No custom groups yet.</p>}
+            {customGroups.map(g=>(
+              <div key={g.id} className={`gm-group-item ${activeGMGroup?.id===g.id?"active":""}`}
+                onClick={()=>{ setActiveGMGroup(g); setGmSearch(""); }}>
+                {renamingGroup===g.id ? (
+                  <input className="gm-new-group" style={{flex:1,margin:0}}
+                    value={renameVal} autoFocus
+                    onChange={e=>setRenameVal(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==="Enter") handleRenameGroup(g.id); if(e.key==="Escape") setRenamingGroup(null); }}
+                    onClick={e=>e.stopPropagation()}/>
+                ) : (
+                  <>
+                    <span className="gm-group-name">{g.name}</span>
+                    <span className="gm-group-count">{g.items.length} items</span>
+                  </>
+                )}
+                <div className="gm-group-actions" onClick={e=>e.stopPropagation()}>
+                  <button className="gm-btn-sm rename" onClick={()=>{ setRenamingGroup(g.id); setRenameVal(g.name); }}>✎</button>
+                  <button className="gm-btn-sm" onClick={()=>handleDeleteGroup(g.id)}>✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Right — group editor */}
+          <div className="gm-main">
+            {!activeGMGroup&&<p className="hint">Select or create a group on the left.</p>}
+            {activeGMGroup&&(
+              <>
+                <h2 className="user-title" style={{marginBottom:12}}>
+                  {activeGMGroup.name}
+                  <span style={{color:"#555",fontWeight:"normal",fontSize:"0.85rem",marginLeft:10}}>
+                    {activeGMGroup.items.length} items
+                  </span>
+                </h2>
+
+                {/* Current members */}
+                <div className="gm-members" style={{marginBottom:16}}>
+                  <h3 className="section-label" style={{marginBottom:6}}>Members</h3>
+                  {activeGMGroup.items.length===0&&<p className="hint" style={{fontSize:"0.8rem"}}>No items yet — search below to add.</p>}
+                  <div>
+                    {activeGMGroup.items.map(item=>(
+                      <span key={item.url_name} className="gm-member-chip">
+                        {item.item_name}
+                        <button onClick={()=>handleRemoveFromGroup(item.url_name)}>✕</button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Add items */}
+                <h3 className="section-label" style={{marginBottom:6}}>Add Items</h3>
+                <input className="gm-item-search user-search"
+                  style={{width:"100%",padding:"8px 12px",background:"#1c1f2b",border:"1px solid #2a2d3a",borderRadius:"6px",color:"#e0e0e0",marginBottom:8}}
+                  placeholder="Search items to add…" value={gmSearch}
+                  onChange={e=>setGmSearch(e.target.value)}/>
+                <div className="gm-item-list">
+                  {gmItems.map(item=>{
+                    const already = activeGMGroup.items.some(i=>i.url_name===item.url_name);
+                    return(
+                      <div key={item.url_name} className="gm-item-row">
+                        <span>{item.item_name}</span>
+                        {already
+                          ? <button className="gm-item-remove" onClick={()=>handleRemoveFromGroup(item.url_name)}>Remove</button>
+                          : <button className="gm-item-add"    onClick={()=>handleAddToGroup(item.url_name)}>+ Add</button>
+                        }
+                      </div>
+                    );
+                  })}
+                  {gmSearch&&gmItems.length===0&&<p className="hint" style={{fontSize:"0.8rem"}}>No items found.</p>}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -229,32 +320,49 @@ function StatsPanel({ urlName }) {
   );
 }
 
-// ── Group Selector ────────────────────────────────────────────────────────────
-function GroupSelector({ groups, selected, onSelect, groupStats = {} }) {
+// ── Group Selector (btn86 style) ──────────────────────────────────────────────
+function GroupSelector({ groups, selected, onSelect, groupStats = {}, customGroups = [] }) {
+  // Separate built-in, NPC (emoji prefix), and custom (★ prefix)
+  const builtin = Object.entries(groups).filter(([k]) => !k.startsWith("★") && !k.match(/^[⚔📚🔬🩸🌿💰🌙🏛🦷☠]/));
+  const npc     = Object.entries(groups).filter(([k]) =>  k.match(/^[⚔📚🔬🩸🌿💰🌙🏛🦷☠]/));
+  const custom  = Object.entries(groups).filter(([k]) =>  k.startsWith("★"));
+
+  function Btn({ g, count }) {
+    const s    = groupStats[g];
+    const isAct  = selected === g;
+    const isLast = s?.isLast;
+    return (
+      <button className={`btn86 ${isAct?"active":""} ${isLast?"last-updated":""}`} onClick={() => onSelect(g)}>
+        <span>{g}</span>
+        <span className="btn86-count">
+          {s ? `${s.done}/${s.total}` : count}
+        </span>
+      </button>
+    );
+  }
+
   return (
-    <div className="group-list">
-      {Object.keys(groups).sort().map(g => {
-        const s     = groupStats[g];
-        const isAct = selected === g;
-        const pct   = s ? Math.round((s.done / s.total) * 100) : null;
-        const isLast = s?.isLast;
-        return (
-          <button key={g}
-            className={`group-list-btn ${isAct?"active":""} ${isLast?"last-updated":""}`}
-            onClick={() => onSelect(g)}
-          >
-            <span className="group-list-name">{g}</span>
-            <span className="group-list-count">
-              {s ? `${s.done}/${s.total}` : (groups[g] ?? "")}
-            </span>
-            {pct !== null && pct < 100 && (
-              <div className="group-inline-bar">
-                <div className="group-inline-fill" style={{width:`${pct}%`}}/>
-              </div>
-            )}
-          </button>
-        );
-      })}
+    <div>
+      <div className="group-section-label">Built-in Groups</div>
+      <div className="group-section-wrap">
+        {builtin.map(([g,c]) => <Btn key={g} g={g} count={c}/>)}
+      </div>
+      {npc.length > 0 && (
+        <>
+          <div className="group-section-label">Syndicate / NPC</div>
+          <div className="group-section-wrap">
+            {npc.map(([g,c]) => <Btn key={g} g={g} count={c}/>)}
+          </div>
+        </>
+      )}
+      {custom.length > 0 && (
+        <>
+          <div className="group-section-label">My Groups</div>
+          <div className="group-section-wrap">
+            {custom.map(([g,c]) => <Btn key={g} g={g} count={c}/>)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -314,13 +422,22 @@ export default function App() {
 
   // Time Analysis
   const [taGroup,      setTaGroup]      = useState("Arcanes");
-  const [taFilters,    setTaFilters]    = useState({ minVolume: 5, maxPrice: 500, platRange: [0, 9999] });
+  const [taFilters,    setTaFilters]    = useState({ minVolume: 5, maxPrice: 500 });
   const [taRunning,    setTaRunning]    = useState(false);
   const [taProgress,   setTaProgress]  = useState(null);
   const [taResults,    setTaResults]   = useState([]);
   const [taSelected,   setTaSelected]  = useState(null);
   const [showTaInfo,   setShowTaInfo]  = useState(false);
   const taEsRef = useRef(null);
+
+  // Group Manager
+  const [customGroups,    setCustomGroups]    = useState([]);
+  const [newGroupName,    setNewGroupName]    = useState("");
+  const [activeGMGroup,   setActiveGMGroup]   = useState(null);
+  const [gmSearch,        setGmSearch]        = useState("");
+  const [gmItems,         setGmItems]         = useState([]);
+  const [renamingGroup,   setRenamingGroup]   = useState(null);
+  const [renameVal,       setRenameVal]       = useState("");
 
   useEffect(() => {
     const t = setTimeout(() => getItems(search).then(setItems).catch(console.error), 300);
@@ -329,6 +446,14 @@ export default function App() {
 
   useEffect(() => { getFavourites().then(setFavs).catch(console.error); }, []);
   useEffect(() => { getScannerGroups().then(setScanGroups).catch(console.error); }, []);
+  useEffect(() => { getCustomGroups().then(setCustomGroups).catch(console.error); }, []);
+
+  // GM item search
+  useEffect(() => {
+    if (!gmSearch.trim()) { setGmItems([]); return; }
+    const t = setTimeout(() => getItems(gmSearch).then(setGmItems).catch(console.error), 300);
+    return () => clearTimeout(t);
+  }, [gmSearch]);
 
   // ── Market ────────────────────────────────────────────────────────────────
   async function handleSelect(item) {
@@ -529,6 +654,49 @@ export default function App() {
     slugsEs.onerror = () => { setTaRunning(false); slugsEs.close(); };
   }
 
+  // ── Group Manager ─────────────────────────────────────────────────────────
+  async function handleCreateGroup() {
+    if (!newGroupName.trim()) return;
+    await createCustomGroup(newGroupName.trim());
+    setNewGroupName("");
+    const [cg, sg] = await Promise.all([getCustomGroups(), getScannerGroups()]);
+    setCustomGroups(cg); setScanGroups(sg);
+  }
+
+  async function handleDeleteGroup(id) {
+    await deleteCustomGroup(id);
+    if (activeGMGroup?.id === id) setActiveGMGroup(null);
+    const [cg, sg] = await Promise.all([getCustomGroups(), getScannerGroups()]);
+    setCustomGroups(cg); setScanGroups(sg);
+  }
+
+  async function handleRenameGroup(id) {
+    if (!renameVal.trim()) return;
+    await renameCustomGroup(id, renameVal.trim());
+    setRenamingGroup(null); setRenameVal("");
+    const [cg, sg] = await Promise.all([getCustomGroups(), getScannerGroups()]);
+    setCustomGroups(cg); setScanGroups(sg);
+    if (activeGMGroup?.id === id) setActiveGMGroup(cg.find(g => g.id === id));
+  }
+
+  async function handleAddToGroup(url_name) {
+    if (!activeGMGroup) return;
+    await addItemToGroup(activeGMGroup.id, url_name);
+    const cg = await getCustomGroups();
+    setCustomGroups(cg);
+    setActiveGMGroup(cg.find(g => g.id === activeGMGroup.id));
+    getScannerGroups().then(setScanGroups);
+  }
+
+  async function handleRemoveFromGroup(url_name) {
+    if (!activeGMGroup) return;
+    await removeItemFromGroup(activeGMGroup.id, url_name);
+    const cg = await getCustomGroups();
+    setCustomGroups(cg);
+    setActiveGMGroup(cg.find(g => g.id === activeGMGroup.id));
+    getScannerGroups().then(setScanGroups);
+  }
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const favSells  = favOrders.filter(o=>o.order_type==="sell");
   const favBuys   = favOrders.filter(o=>o.order_type==="buy");
@@ -550,7 +718,7 @@ export default function App() {
         <h1>WMPersonal</h1>
         <p>Warframe Market Monitor</p>
         <div className="tabs">
-          {[["market","Market"],["user","User Orders"],["favs",`Favs${favs.length?` (${favs.length})`:""}`],["scanner","Scanner"],["profit","Profit"],["timeanalysis","Time Analysis"]].map(([t,l])=>(
+          {[["market","Market"],["user","User Orders"],["favs",`Favs${favs.length?` (${favs.length})`:""}`],["scanner","Scanner"],["profit","Profit"],["timeanalysis","Time Analysis"],["groups","Group Manager"]].map(([t,l])=>(
             <button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{l}</button>
           ))}
         </div>

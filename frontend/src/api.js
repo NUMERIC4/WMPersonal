@@ -32,9 +32,6 @@ export const refreshFavourites = () =>
 export const getStats = (url_name, period = "48h", rank = null) =>
   axios.get(`${BASE}/stats/${url_name}`, { params: { period, rank } }).then(r => r.data);
 
-export const getStatsSummary = (url_name) =>
-  axios.get(`${BASE}/stats/${url_name}/summary`).then(r => r.data);
-
 export const getScannerGroups = () =>
   axios.get(`${BASE}/scanner/groups`).then(r => r.data);
 
@@ -43,3 +40,24 @@ export const cancelScan = () =>
 
 export const getTimeAnalysis = (url_name, rank = null) =>
   axios.get(`${BASE}/timeanalysis/${url_name}`, { params: { rank } }).then(r => r.data);
+
+export const getCustomGroups = () =>
+  axios.get(`${BASE}/customgroups`).then(r => r.data);
+
+export const createCustomGroup = (name) =>
+  axios.post(`${BASE}/customgroups`, { name }).then(r => r.data);
+
+export const deleteCustomGroup = (id) =>
+  axios.delete(`${BASE}/customgroups/${id}`).then(r => r.data);
+
+export const renameCustomGroup = (id, name) =>
+  axios.patch(`${BASE}/customgroups/${id}`, { name }).then(r => r.data);
+
+export const addItemToGroup = (id, url_name) =>
+  axios.post(`${BASE}/customgroups/${id}/items`, { url_name }).then(r => r.data);
+
+export const removeItemFromGroup = (id, url_name) =>
+  axios.delete(`${BASE}/customgroups/${id}/items/${url_name}`).then(r => r.data);
+
+export const getNpcGroups = () =>
+  axios.get(`${BASE}/customgroups/npc`).then(r => r.data);
