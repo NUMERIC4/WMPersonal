@@ -54,6 +54,7 @@ let cancelFlag = false;
 router.get("/groups", (req, res) => {
   const db = getDb();
   const items = db.prepare("SELECT item_name, url_name FROM items").all();
+  const allSlugs = items.map(i => i.url_name);
 
   const counts = {};
   for (const item of items) {
@@ -62,31 +63,30 @@ router.get("/groups", (req, res) => {
   }
   counts["All Items"] = items.length;
 
-  // Add custom groups (non-empty only)
+  // Custom groups (non-empty only)
   const customGroups = db.prepare(
-    "SELECT cg.id, cg.name, COUNT(cgi.url_name) as cnt " +
+    "SELECT cg.name, COUNT(cgi.url_name) as cnt " +
     "FROM custom_groups cg " +
     "LEFT JOIN custom_group_items cgi ON cgi.group_id = cg.id " +
     "GROUP BY cg.id HAVING cnt > 0"
   ).all();
   for (const g of customGroups) counts[`★ ${g.name}`] = g.cnt;
 
-  // Add NPC/syndicate groups
-  const SYNDICATE_PATTERNS = {
-    "⚔ Steel Meridian":    ["vaykor","morgha","shrapnel rounds"],
-    "📚 Arbiters of Hexis": ["telos","sancti"],
-    "🔬 Cephalon Suda":     ["synoid"],
-    "🩸 Red Veil":          ["rakta","sacrificial"],
-    "🌿 New Loka":          ["locust","new loka"],
-    "💰 Perrin Sequence":   ["secura"],
-    "🌙 Nightwave":         ["wolf","nora"],
-    "🏛 Entrati":           ["necramech","entrati"],
-    "🦷 Quills / Arcanes":  ["arcane "],
-    "☠ Necraloid":         ["latrox","necraloid"],
+  // NPC/syndicate groups — use exact slug matching against local DB
+  const SYNDICATE_SLUGS = {
+    "⚔ Steel Meridian":    ["vaykor_hek","vaykor_marelok","vaykor_sydon","scattered_justice","final_harbinger","bleeding_willow","ironclad_charge","divine_spears","warcry","flowing_strike","celestial_stomp","smite_infusion","killing_blow","iron_vault","high_noon","renewal","ore_gaze","blazing_chakram","burning_wasp","roar","eclipse"],
+    "📚 Arbiters of Hexis": ["telos_boltor","telos_akbolto","telos_boltace","entropy_burst","entropy_detonation","entropy_flight","fatal_teleport","elusive_ward","shelter_against_storm","empowered_quiver","guardian_derision","ghoulish_gaze","irradiating_disarm","radiant_finish","lasting_covenant","rending_turn"],
+    "🔬 Cephalon Suda":     ["synoid_gammacor","synoid_simulor","synoid_helicor","kinetic_diversion","null_audit","neutralizing_justice","resonating_quake","sonic_fracture","lifeblood","target_acquired","pilfering_swarm","master_thief","prism_guard","rift_torrent","overwhelming_fumes","wicked_might","lethal_infliction"],
+    "💰 Perrin Sequence":   ["secura_penta","secura_dual_cestra","secura_lecta","tether_grenades","new_strange","hemorrhage","accumulating_whipclaw","spectrorage","manic_instinct","vicious_spread","directed_convergence","iron_shrapnel"],
+    "🩸 Red Veil":          ["rakta_ballistica","rakta_cernos","rakta_dark_dagger","gleaming_blight","seeding_step","guardian_shell","blood_altar","spellbind","navigator","subsumed_fury","targeting_receptor","savior_decoy","smoke_shadow","tidal_impunity","fatal_acceleration","fire_fright","reaping_chakram"],
+    "🌿 New Loka":          ["sancti_tigris","sancti_castanas","sancti_magistar","lasting_sting","concentrated_arrow","whirlwind","tempest_barrage","magnetize","empowered_blades","elemental_sandstorm","warding_grace","chromatic_blade","ensnare","molt_vigor","ring_of_fire"],
+    "🏛 Entrati":           ["necramech_friction","necramech_drift","necramech_blitz","necramech_continuity","necramech_deflection","necramech_enemy_sense","necramech_fury","necramech_hydraulics","necramech_redirection","necramech_seismic_wave","necramech_streamline","necramech_stretch","necramech_vitality","necramech_intensity","necramech_pressure_point"],
+    "🌙 Nightwave":         ["wolf_sledge_set","wolf_sledge_blueprint","wolf_sledge_head","wolf_sledge_handle","wolf_sledge_motor","umbra_forma_blueprint","dread_mirror"],
   };
-  for (const [label, keywords] of Object.entries(SYNDICATE_PATTERNS)) {
-    const c = items.filter(i => keywords.some(k => i.item_name.toLowerCase().includes(k))).length;
-    if (c > 0) counts[label] = c;
+
+  for (const [label, slugs] of Object.entries(SYNDICATE_SLUGS)) {
+    const found = slugs.filter(s => allSlugs.includes(s)).length;
+    if (found > 0) counts[label] = found;
   }
 
   res.json(counts);
