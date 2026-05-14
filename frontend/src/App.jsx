@@ -1,15 +1,15 @@
 ﻿import { useState, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import {
   getItems, fetchPrice, getPriceHistory, getUserOrders,
   getFavourites, addFavourite, removeFavourite,
   getFavouriteOrders, refreshFavourites, API_BASE,
-  getStats, getScannerGroups, cancelScan, getTimeAnalysis,
+  getStats, getScannerGroups, cancelScan,
   getScannerItems, cancelProfit, cancelTimeAnalysis,
   syncMarketItems,
   getCustomGroups, createCustomGroup, deleteCustomGroup,
   renameCustomGroup, addItemToGroup, removeItemFromGroup,
+  getAlecaStatus, getAlecaSummary, getAlecaTrades, getAlecaRelics,
 } from "./api";
 import "./App.css";
 
@@ -19,6 +19,19 @@ const BASE = API_BASE;
 function rankLabel(rank, maxRank) {
   if (rank === null || rank === undefined) return null;
   return maxRank != null ? `R${rank}/${maxRank}` : `R${rank}`;
+}
+
+function platPerKStanding(value, standingCost) {
+  if (value === null || value === undefined || !standingCost) return null;
+  return Math.round((value * 1000 / standingCost) * 100) / 100;
+}
+
+function fmtNum(value) {
+  return value === null || value === undefined ? "/" : value.toLocaleString();
+}
+
+function tradeTypeLabel(type) {
+  return type === 0 ? "Sale" : type === 1 ? "Purchase" : "Trade";
 }
 
 // ── Info Popup ────────────────────────────────────────────────────────────────
@@ -93,7 +106,7 @@ function OrderTable({ orders, onItemClick, showLive = false }) {
                              : (av > bv ? -1 : av < bv ? 1 : 0);
   });
 
-  function SortTh({ label, k }) {
+  function renderSortTh(label, k) {
     const active = sortKey === k;
     return (
       <th className={`sortable ${active?"sorted":""}`} onClick={() => toggleSort(k)}>
@@ -124,15 +137,15 @@ function OrderTable({ orders, onItemClick, showLive = false }) {
         <table>
           <thead>
             <tr>
-              <SortTh label="Item"   k="item_name"/>
-              <SortTh label="Rank"   k="rank"/>
-              <SortTh label="Listed" k="platinum"/>
-              <SortTh label="Qty"    k="quantity"/>
-              {showLive && <SortTh label="Mkt Min" k="live_min"/>}
-              {showLive && <SortTh label="Mkt Avg" k="live_avg"/>}
-              <SortTh label="DB Min" k="db_min"/>
-              <SortTh label="DB Avg" k="db_avg"/>
-              <SortTh label="Status" k="status"/>
+              {renderSortTh("Item", "item_name")}
+              {renderSortTh("Rank", "rank")}
+              {renderSortTh("Listed", "platinum")}
+              {renderSortTh("Qty", "quantity")}
+              {showLive && renderSortTh("Mkt Min", "live_min")}
+              {showLive && renderSortTh("Mkt Avg", "live_avg")}
+              {renderSortTh("DB Min", "db_min")}
+              {renderSortTh("DB Avg", "db_avg")}
+              {renderSortTh("Status", "status")}
               <th>Last Saved</th>
             </tr>
           </thead>
@@ -175,20 +188,30 @@ function StatsPanel({ urlName }) {
 
   useEffect(() => {
     if (!urlName) return;
-    setLoading(true);
-    getStats(urlName, period)
-      .then(rows => setData(rows.map(r => ({
-        t:          period==="48h"
-                      ? new Date(r.datetime).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})
-                      : new Date(r.datetime).toLocaleDateString(),
-        avg:        r.avg_price,
-        median:     r.median,
-        moving_avg: r.moving_avg,
-        volume:     r.volume,
-        rank:       r.rank,
-      }))))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    let active = true;
+    async function loadStats() {
+      setLoading(true);
+      try {
+        const rows = await getStats(urlName, period);
+        if (!active) return;
+        setData(rows.map(r => ({
+          t:          period==="48h"
+                        ? new Date(r.datetime).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})
+                        : new Date(r.datetime).toLocaleDateString(),
+          avg:        r.avg_price,
+          median:     r.median,
+          moving_avg: r.moving_avg,
+          volume:     r.volume,
+          rank:       r.rank,
+        })));
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    loadStats();
+    return () => { active = false; };
   }, [urlName, period]);
 
   if (!urlName) return null;
@@ -234,7 +257,7 @@ function StatsPanel({ urlName }) {
 }
 
 // ── Group Selector (btn86 style) ──────────────────────────────────────────────
-function GroupSelector({ groups, selected, onSelect, groupStats = {}, customGroups = [] }) {
+function GroupSelector({ groups, selected, onSelect, groupStats = {} }) {
   const builtin = Object.entries(groups).filter(([k]) => !k.startsWith("Custom: ") && !k.startsWith("NPC: "));
   const npc     = Object.entries(groups).filter(([k]) =>  k.startsWith("NPC: "));
   const custom  = Object.entries(groups).filter(([k]) =>  k.startsWith("Custom: "));
@@ -319,7 +342,6 @@ export default function App() {
   const [groupStats,   setGroupStats]   = useState({});
   const [groupResults, setGroupResults] = useState({});
   const [viewGroup,    setViewGroup]    = useState(null);
-  const [lastGroup,    setLastGroup]    = useState(null);
   const scanEsRef = useRef(null);
   const [syncingGroups, setSyncingGroups] = useState(false);
   const [scanSort, setScanSort] = useState("item");
@@ -345,6 +367,14 @@ export default function App() {
   const [showTaInfo,   setShowTaInfo]  = useState(false);
   const taEsRef = useRef(null);
 
+  // Alecaframe
+  const [alecaStatus,  setAlecaStatus]  = useState(null);
+  const [alecaSummary, setAlecaSummary] = useState(null);
+  const [alecaTrades,  setAlecaTrades]  = useState([]);
+  const [alecaRelics,  setAlecaRelics]  = useState([]);
+  const [alecaLoading, setAlecaLoading] = useState(false);
+  const [alecaError,   setAlecaError]   = useState("");
+
   // Group Manager
   const [customGroups,    setCustomGroups]    = useState([]);
   const [newGroupName,    setNewGroupName]    = useState("");
@@ -363,9 +393,17 @@ export default function App() {
   useEffect(() => { getScannerGroups().then(setScanGroups).catch(console.error); }, []);
   useEffect(() => { getCustomGroups().then(setCustomGroups).catch(console.error); }, []);
 
+  useEffect(() => {
+    if (tab !== "alecaframe" || alecaStatus) return;
+    loadAlecaFrame();
+  }, [tab, alecaStatus]);
+
   // GM item search
   useEffect(() => {
-    if (!gmSearch.trim()) { setGmItems([]); return; }
+    if (!gmSearch.trim()) {
+      const t = setTimeout(() => setGmItems([]), 0);
+      return () => clearTimeout(t);
+    }
     const t = setTimeout(() => getItems(gmSearch).then(setGmItems).catch(console.error), 300);
     return () => clearTimeout(t);
   }, [gmSearch]);
@@ -404,7 +442,7 @@ export default function App() {
         await Promise.all(slugs.map(s=>getPriceHistory(s).then(h=>{res[s]=h;}).catch(()=>{res[s]=[];})));
         setItemHistories(res);
       }
-    } catch (e) { setUserError("User not found or API error."); }
+    } catch { setUserError("User not found or API error."); }
     setLoadingUser(false);
   }
 
@@ -440,7 +478,7 @@ export default function App() {
   // ── Scanner SSE ───────────────────────────────────────────────────────────
   function startScan() {
     if (scanRunning) return;
-    setScanRunning(true); setScanProgress(null); setScanLog(""); setLastGroup(scanGroup);
+    setScanRunning(true); setScanProgress(null); setScanLog("");
 
     const es = new EventSource(`${BASE}/scanner/run?group=${encodeURIComponent(scanGroup)}`);
     scanEsRef.current = es;
@@ -462,9 +500,19 @@ export default function App() {
           [scanGroup]: { done:msg.done, total:msg.total, isLast:false }
         }));
         if (msg.snap) {
+          const standingCost = msg.standing_cost ?? null;
+          const minPlatPerKStanding = platPerKStanding(msg.snap.min, standingCost);
+          const avgPlatPerKStanding = platPerKStanding(msg.snap.avg, standingCost);
           setGroupResults(prev => ({
             ...prev,
-            [scanGroup]: [...(prev[scanGroup]??[]), {item:msg.item, url_name:msg.snap?.url_name, ...msg.snap}]
+            [scanGroup]: [...(prev[scanGroup]??[]), {
+              item: msg.item,
+              url_name: msg.snap?.url_name,
+              standingCost,
+              minPlatPerKStanding,
+              avgPlatPerKStanding,
+              ...msg.snap,
+            }]
           }));
         }
       }
@@ -595,6 +643,35 @@ export default function App() {
     setTaRunning(false);
   }
 
+  async function loadAlecaFrame() {
+    setAlecaLoading(true);
+    setAlecaError("");
+    try {
+      const status = await getAlecaStatus();
+      setAlecaStatus(status);
+      if (!status.configured) {
+        setAlecaSummary(null);
+        setAlecaTrades([]);
+        setAlecaRelics([]);
+        setAlecaError("Configure ALECA_PUBLIC_TOKEN or ALECA_USER_HASH in backend/.env.");
+        return;
+      }
+
+      const [summary, trades, relics] = await Promise.all([
+        getAlecaSummary(),
+        getAlecaTrades(),
+        status.relicsConfigured ? getAlecaRelics().catch(() => []) : Promise.resolve([]),
+      ]);
+      setAlecaSummary(summary);
+      setAlecaTrades(trades);
+      setAlecaRelics(relics);
+    } catch (error) {
+      setAlecaError(error.response?.data?.error ?? error.message);
+    } finally {
+      setAlecaLoading(false);
+    }
+  }
+
   // ── Group Manager ─────────────────────────────────────────────────────────
   async function handleCreateGroup() {
     if (!newGroupName.trim()) return;
@@ -644,9 +721,7 @@ export default function App() {
   const userSells = enrichedUserOrders.filter(o=>o.order_type==="sell");
   const userBuys  = enrichedUserOrders.filter(o=>o.order_type==="buy");
 
-  const groupList = Object.keys(scanGroups).sort();
-
-  function PSortTh({label,k}) {
+  function renderProfitSortTh(label, k) {
     const a=profitSort===k;
     return <th className={`sortable ${a?"sorted":""}`} onClick={()=>toggleProfitSort(k)}>{label}{a?(profitDir==="asc"?" ▲":" ▼"):""}</th>;
   }
@@ -659,7 +734,7 @@ export default function App() {
     return 0;
   }) : [];
 
-  function ScanSortTh({ label, k }) {
+  function renderScanSortTh(label, k) {
     const active = scanSort === k;
     return <th className={`sortable ${active?"sorted":""}`} onClick={()=>toggleScanSort(k)}>{label}{active?(scanDir==="asc"?" ▲":" ▼"):""}</th>;
   }
@@ -670,7 +745,7 @@ export default function App() {
         <h1>WMPersonal</h1>
         <p>Warframe Market Monitor</p>
         <div className="tabs">
-          {[["market","Market"],["user","User Orders"],["favs",`Favs${favs.length?` (${favs.length})`:""}`],["scanner","Scanner"],["profit","Profit"],["timeanalysis","Time Analysis"],["groups","Group Manager"]].map(([t,l])=>(
+          {[["market","Market"],["user","User Orders"],["favs",`Favs${favs.length?` (${favs.length})`:""}`],["scanner","Scanner"],["profit","Profit"],["timeanalysis","Time Analysis"],["alecaframe","Alecaframe"],["groups","Group Manager"]].map(([t,l])=>(
             <button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{l}</button>
           ))}
         </div>
@@ -844,11 +919,14 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
-                        <ScanSortTh label="Item" k="item"/>
-                        <ScanSortTh label="Min" k="min"/>
-                        <ScanSortTh label="Avg" k="avg"/>
-                        <ScanSortTh label="Max" k="max"/>
-                        <ScanSortTh label="Vol" k="volume"/>
+                        {renderScanSortTh("Item", "item")}
+                        {renderScanSortTh("Min", "min")}
+                        {renderScanSortTh("Avg", "avg")}
+                        {renderScanSortTh("Max", "max")}
+                        {renderScanSortTh("Vol", "volume")}
+                        {renderScanSortTh("Standing", "standingCost")}
+                        {renderScanSortTh("Min / 1k", "minPlatPerKStanding")}
+                        {renderScanSortTh("Avg / 1k", "avgPlatPerKStanding")}
                       </tr>
                     </thead>
                     <tbody>
@@ -859,6 +937,9 @@ export default function App() {
                           <td>{r.avg} pt</td>
                           <td>{r.max} pt</td>
                           <td>{r.volume}</td>
+                          <td>{r.standingCost?r.standingCost.toLocaleString():"/"}</td>
+                          <td>{r.minPlatPerKStanding!=null?`${r.minPlatPerKStanding} pt`:"/"}</td>
+                          <td>{r.avgPlatPerKStanding!=null?`${r.avgPlatPerKStanding} pt`:"/"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -896,17 +977,21 @@ export default function App() {
               <table>
                 <thead>
                   <tr>
-                    <PSortTh label="Item"       k="item_name"/>
-                    <PSortTh label="Rank"       k="rank"/>
-                    <PSortTh label="Min Sell"   k="minSell"/>
-                    <PSortTh label="Max Buy"    k="maxBuy"/>
-                    <PSortTh label="Margin"     k="margin"/>
-                    <PSortTh label="Off. Min"   k="offlineMinSell"/>
-                    <PSortTh label="Vol 48h"    k="vol48h"/>
-                    <PSortTh label="Vol 90d"    k="vol90d"/>
-                    <PSortTh label="Avg/Day"    k="avgDaily90d"/>
-                    <PSortTh label="Med. Avg"   k="avgMedian90d"/>
-                    <PSortTh label="Score ↓"    k="score"/>
+                    {renderProfitSortTh("Item", "item_name")}
+                    {renderProfitSortTh("Rank", "rank")}
+                    {renderProfitSortTh("Min Sell", "minSell")}
+                    {renderProfitSortTh("Max Buy", "maxBuy")}
+                    {renderProfitSortTh("Margin", "margin")}
+                    {renderProfitSortTh("Standing", "standingCost")}
+                    {renderProfitSortTh("Sell / 1k", "minSellPerKStanding")}
+                    {renderProfitSortTh("Avg / 1k", "avgMedianPerKStanding")}
+                    {renderProfitSortTh("Margin / 1k", "marginPerKStanding")}
+                    {renderProfitSortTh("Off. Min", "offlineMinSell")}
+                    {renderProfitSortTh("Vol 48h", "vol48h")}
+                    {renderProfitSortTh("Vol 90d", "vol90d")}
+                    {renderProfitSortTh("Avg/Day", "avgDaily90d")}
+                    {renderProfitSortTh("Med. Avg", "avgMedian90d")}
+                    {renderProfitSortTh("Score ↓", "score")}
                   </tr>
                 </thead>
                 <tbody>
@@ -919,6 +1004,10 @@ export default function App() {
                         <td>{p.minSell??"/"}pt</td>
                         <td>{p.maxBuy??"/"}pt</td>
                         <td><span className={`badge badge-${mc}`}>{p.margin!=null?`${p.margin>0?"+":""}${p.margin}pt`:"/"}</span></td>
+                        <td>{p.standingCost?p.standingCost.toLocaleString():"/"}</td>
+                        <td>{p.minSellPerKStanding!=null?`${p.minSellPerKStanding}pt`:"/"}</td>
+                        <td>{p.avgMedianPerKStanding!=null?`${p.avgMedianPerKStanding}pt`:"/"}</td>
+                        <td>{p.marginPerKStanding!=null?`${p.marginPerKStanding}pt`:"/"}</td>
                         <td>{p.offlineMinSell??"/"}pt</td>
                         <td>{p.vol48h}</td>
                         <td>{p.vol90d}</td>
@@ -943,6 +1032,103 @@ export default function App() {
               <p style={{marginTop:8}}><strong>Row colors:</strong> Green = margin &gt; 50pt, Yellow = 10–50pt, Red = 0 or negative.</p>
               <p style={{marginTop:8}}><strong>Limit:</strong> Analyzes up to 50 items per run to stay within rate limits.</p>
             </InfoPopup>
+          )}
+        </div>
+      )}
+
+      {/* ── ALECAFRAME ── */}
+      {tab==="alecaframe"&&(
+        <div className="user-page aleca-page">
+          <div className="scan-header">
+            <div>
+              <h2 className="user-title">Alecaframe</h2>
+              {alecaSummary?.lastUpdate&&(
+                <p className="hint-inline">Last update: {new Date(alecaSummary.lastUpdate).toLocaleString()}</p>
+              )}
+            </div>
+            <button className="refresh-btn" onClick={loadAlecaFrame} disabled={alecaLoading}>
+              {alecaLoading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          {alecaError&&(
+            <div className="aleca-warning">
+              {alecaError}
+              <code>ALECA_PUBLIC_TOKEN</code>, <code>ALECA_USER_HASH</code>, or <code>ALECA_RELIC_TOKEN</code>
+            </div>
+          )}
+
+          {alecaSummary&&(
+            <>
+              <div className="snapshot aleca-summary">
+                <div className="stat"><span>Platinum</span><strong>{fmtNum(alecaSummary.latest?.plat)}</strong></div>
+                <div className="stat"><span>Credits</span><strong>{fmtNum(alecaSummary.latest?.credits)}</strong></div>
+                <div className="stat"><span>Endo</span><strong>{fmtNum(alecaSummary.latest?.endo)}</strong></div>
+                <div className="stat"><span>Ducats</span><strong>{fmtNum(alecaSummary.latest?.ducats)}</strong></div>
+                <div className="stat"><span>MR</span><strong>{fmtNum(alecaSummary.latest?.mr)}</strong></div>
+                <div className="stat"><span>Completion</span><strong>{alecaSummary.latest?.percentageCompletion ?? "/"}%</strong></div>
+              </div>
+
+              <div className="snapshot aleca-summary">
+                <div className="stat"><span>Trades</span><strong>{fmtNum(alecaSummary.tradeSummary.count)}</strong></div>
+                <div className="stat"><span>Sales</span><strong>{fmtNum(alecaSummary.tradeSummary.sales)}</strong></div>
+                <div className="stat"><span>Purchases</span><strong>{fmtNum(alecaSummary.tradeSummary.purchases)}</strong></div>
+                <div className="stat"><span>Sale Plat</span><strong>{fmtNum(alecaSummary.tradeSummary.salePlat)}</strong></div>
+                <div className="stat"><span>Purchase Plat</span><strong>{fmtNum(alecaSummary.tradeSummary.purchasePlat)}</strong></div>
+                <div className="stat"><span>Net Plat</span><strong>{fmtNum(alecaSummary.tradeSummary.netPlat)}</strong></div>
+              </div>
+            </>
+          )}
+
+          {alecaTrades.length>0&&(
+            <>
+              <h3 className="section-label">Recent Trades</h3>
+              <div className="order-section aleca-table">
+                <table>
+                  <thead>
+                    <tr><th>Time</th><th>Type</th><th>Partner</th><th>Received</th><th>Given</th><th>Plat</th></tr>
+                  </thead>
+                  <tbody>
+                    {alecaTrades.slice(0, 40).map((trade,i)=>(
+                      <tr key={`${trade.ts}-${i}`}>
+                        <td className="ts-cell">{new Date(trade.ts).toLocaleString()}</td>
+                        <td>{tradeTypeLabel(trade.type)}</td>
+                        <td>{trade.user ?? "/"}</td>
+                        <td>{(trade.rx??[]).map(item=>`${item.displayName??item.name} x${item.cnt}`).join(", ") || "/"}</td>
+                        <td>{(trade.tx??[]).map(item=>`${item.displayName??item.name} x${item.cnt}`).join(", ") || "/"}</td>
+                        <td>{trade.totalPlat ?? "/"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {alecaRelics.length>0&&(
+            <>
+              <h3 className="section-label">Relic Inventory</h3>
+              <div className="order-section aleca-table">
+                <table>
+                  <thead>
+                    <tr><th>Relic</th><th>Refinement</th><th>Quantity</th></tr>
+                  </thead>
+                  <tbody>
+                    {alecaRelics.slice(0, 80).map((relic,i)=>(
+                      <tr key={`${relic.relic}-${relic.refinement}-${i}`}>
+                        <td>{relic.relic}</td>
+                        <td>{relic.refinement}</td>
+                        <td>{relic.quantity}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {!alecaLoading&&!alecaSummary&&!alecaError&&(
+            <p className="hint">Refresh Alecaframe to load your stats.</p>
           )}
         </div>
       )}

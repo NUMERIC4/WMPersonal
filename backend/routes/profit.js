@@ -18,8 +18,13 @@ async function getFullOrders(url_name) {
   }
 }
 
+function platPerKStanding(value, standingCost) {
+  if (value === null || value === undefined || !standingCost) return null;
+  return Math.round((value * 1000 / standingCost) * 100) / 100;
+}
+
 // Build profit profile for a single item+rank combo
-function buildProfile(url_name, item_name, rank, maxRank, orders, stats90) {
+function buildProfile(url_name, item_name, rank, maxRank, standingCost, orders, stats90) {
   const sells   = orders.filter(o => o.type === "sell" && (o.rank ?? null) === rank);
   const buys    = orders.filter(o => o.type === "buy"  && (o.rank ?? null) === rank);
   const onSell  = sells.filter(o => o.user?.status === "ingame").map(o => o.platinum).sort((a,b) => a-b);
@@ -43,7 +48,11 @@ function buildProfile(url_name, item_name, rank, maxRank, orders, stats90) {
 
   return {
     url_name, item_name, rank, maxRank,
+    standingCost,
     minSell, maxBuy, margin,
+    minSellPerKStanding: platPerKStanding(minSell, standingCost),
+    avgMedianPerKStanding: platPerKStanding(avgMedian, standingCost),
+    marginPerKStanding: platPerKStanding(margin, standingCost),
     offlineMinSell: offSell[0] ?? null,
     onlineSellers:  onSell.length,
     onlineBuyers:   onBuy.length,
@@ -98,7 +107,15 @@ router.get("/scan", async (req, res) => {
           "SELECT * FROM item_statistics WHERE url_name=? AND period='90d' AND (rank=? OR (rank IS NULL AND ? IS NULL)) ORDER BY datetime DESC LIMIT 30"
         ).all(item.url_name, rank, rank);
 
-        const profile = buildProfile(item.url_name, item.item_name, rank, item.max_rank, orders, stats90);
+        const profile = buildProfile(
+          item.url_name,
+          item.item_name,
+          rank,
+          item.max_rank,
+          item.standing_cost,
+          orders,
+          stats90
+        );
         if (profile.margin !== null || profile.vol90d > 0) profiles.push(profile);
       }
 
