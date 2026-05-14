@@ -369,6 +369,36 @@ th.sorted { color: #c8a96e; }
   margin: 12px 0;
 }
 
+/* Alecaframe */
+.hint-inline {
+  color: #666;
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
+
+.aleca-warning {
+  border: 1px solid #7a5d2b;
+  background: #2b2414;
+  color: #e6c98c;
+  border-radius: 7px;
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+
+.aleca-warning code {
+  color: #f0d493;
+  margin: 0 2px;
+}
+
+.aleca-summary {
+  margin: 12px 0;
+}
+
+.aleca-table td {
+  vertical-align: top;
+  max-width: 360px;
+}
+
 @media (max-width: 900px) {
   .scanner-layout {
     grid-template-columns: 1fr;

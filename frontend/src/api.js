@@ -73,3 +73,15 @@ export const removeItemFromGroup = (id, url_name) =>
 
 export const getNpcGroups = () =>
   axios.get(`${API_BASE}/customgroups/npc`).then(r => r.data);
+
+export const getAlecaStatus = () =>
+  axios.get(`${API_BASE}/alecaframe/status`).then(r => r.data);
+
+export const getAlecaSummary = () =>
+  axios.get(`${API_BASE}/alecaframe/summary`).then(r => r.data);
+
+export const getAlecaTrades = () =>
+  axios.get(`${API_BASE}/alecaframe/trades`).then(r => r.data);
+
+export const getAlecaRelics = () =>
+  axios.get(`${API_BASE}/alecaframe/relics`).then(r => r.data);

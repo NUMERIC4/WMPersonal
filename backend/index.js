@@ -14,6 +14,7 @@ import scannerRouter      from "./routes/scanner.js";
 import profitRouter       from "./routes/profit.js";
 import timeanalysisRouter from "./routes/timeanalysis.js";
 import customGroupsRouter from "./routes/customgroups.js";
+import alecaframeRouter   from "./routes/alecaframe.js";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const app = express();
@@ -34,6 +35,7 @@ app.use("/api/scanner",       scannerRouter);      // GET /api/scanner/groups, /
 app.use("/api/profit",        profitRouter);       // GET /api/profit?mode=all&min_margin=15
 app.use("/api/timeanalysis",  timeanalysisRouter); // GET /api/timeanalysis/:url_name, POST /batch
 app.use("/api/customgroups",  customGroupsRouter); // GET/POST /api/customgroups, /npc, /npc/:syndicate
+app.use("/api/alecaframe",    alecaframeRouter);   // GET /api/alecaframe/summary, /trades, /relics
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));

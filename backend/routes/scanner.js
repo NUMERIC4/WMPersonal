@@ -64,7 +64,14 @@ router.get("/run", async (req, res) => {
 
     try {
       const snap = await fetchPriceSnapshot(item.url_name);
-      send({ type: "progress", done: ++done, total, item: item.item_name, snap });
+      send({
+        type: "progress",
+        done: ++done,
+        total,
+        item: item.item_name,
+        standing_cost: item.standing_cost,
+        snap,
+      });
     } catch (error) {
       send({ type: "progress", done: ++done, total, item: item.item_name, error: error.message });
     }
