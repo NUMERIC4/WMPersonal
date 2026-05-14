@@ -70,8 +70,8 @@ export async function fetchPriceSnapshot(url_name, rank = null) {
 
   const db = getDb();
   db.prepare(
-    "INSERT INTO price_snapshots (url_name, min_price, avg_price, max_price, volume) VALUES (?, ?, ?, ?, ?)"
-  ).run(url_name, min, Math.round(avg * 100) / 100, max, prices.length);
+    "INSERT INTO price_snapshots (url_name, rank, min_price, avg_price, max_price, volume) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(url_name, rank, min, Math.round(avg * 100) / 100, max, prices.length);
 
   // Lazily cache max_rank
   const maxRank = await ensureMaxRank(url_name);

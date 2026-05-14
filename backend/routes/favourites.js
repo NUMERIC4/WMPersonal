@@ -23,6 +23,18 @@ router.delete("/:slug", (req, res) => {
   res.json({ deleted: req.params.slug });
 });
 
+function extractErrorMessage(e) {
+  if (!e) return "Unknown error";
+  if (e.body && typeof e.body === "object") {
+    const requestErrors = e.body.error?.request;
+    if (Array.isArray(requestErrors) && requestErrors.includes("app.user.notFound")) {
+      return "User not found";
+    }
+    return JSON.stringify(e.body);
+  }
+  return e.message || String(e);
+}
+
 router.get("/:slug/orders", async (req, res) => {
   const { slug } = req.params;
   try {
@@ -63,7 +75,7 @@ router.get("/:slug/orders", async (req, res) => {
 
     res.json(enriched);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: extractErrorMessage(err) });
   }
 });
 

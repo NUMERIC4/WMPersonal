@@ -19,6 +19,7 @@ export function initDb() {
     "CREATE TABLE IF NOT EXISTS price_snapshots (" +
     "  id         INTEGER PRIMARY KEY AUTOINCREMENT," +
     "  url_name   TEXT NOT NULL," +
+    "  rank       INTEGER," +
     "  min_price  REAL," +
     "  avg_price  REAL," +
     "  max_price  REAL," +
@@ -85,6 +86,7 @@ export function initDb() {
 
   // Migrations
   try { db.exec("ALTER TABLE items ADD COLUMN max_rank INTEGER"); } catch (_) {}
+  try { db.exec("ALTER TABLE price_snapshots ADD COLUMN rank INTEGER"); } catch (_) {}
 
   seedGroups();
   console.log("Database ready.");

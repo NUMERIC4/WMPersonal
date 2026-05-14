@@ -17,6 +17,18 @@ export async function refreshFavourites() {
   const favs = db.prepare("SELECT slug FROM favourite_users").all();
   const results = [];
 
+  function extractErrorMessage(e) {
+    if (!e) return "Unknown error";
+    if (e.body && typeof e.body === "object") {
+      const requestErrors = e.body.error?.request;
+      if (Array.isArray(requestErrors) && requestErrors.includes("app.user.notFound")) {
+        return "User not found";
+      }
+      return JSON.stringify(e.body);
+    }
+    return e.message || String(e);
+  }
+
   for (const { slug } of favs) {
     try {
       const json = await queueFetch(`https://api.warframe.market/v2/orders/user/${slug}`);
@@ -36,15 +48,16 @@ export async function refreshFavourites() {
           await fetchPriceSnapshot(itemSlug);
           fetched++;
         } catch (e) {
-          console.warn(`  Failed snapshot for ${itemSlug}: ${e.message}`);
+          console.warn(`  Failed snapshot for ${itemSlug}: ${extractErrorMessage(e)}`);
         }
       }
 
       console.log(`  ${slug}: ${orders.length} orders, ${fetched} snapshots saved.`);
       results.push({ slug, orders: orders.length, snapshots: fetched });
     } catch (e) {
-      console.error(`  Failed to refresh ${slug}: ${e.message}`);
-      results.push({ slug, error: e.message });
+      const message = extractErrorMessage(e);
+      console.error(`  Failed to refresh ${slug}: ${message}`);
+      results.push({ slug, error: message });
     }
   }
 

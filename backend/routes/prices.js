@@ -10,8 +10,21 @@ router.post("/fetch", async (req, res) => {
   const url_name = req.body?.url_name;
   if (!url_name) return res.status(400).json({ error: "url_name required" });
   try {
+    const db = getDb();
+    const itemRow = db.prepare("SELECT max_rank FROM items WHERE url_name = ?").get(url_name);
+    const maxRank = itemRow?.max_rank ?? null;
+
     const snapshot = await fetchPriceSnapshot(url_name);
-    res.json({ snapshot, queue: queueLength() });
+    const rankSnapshots = [];
+
+    if (maxRank !== null && maxRank !== undefined && maxRank !== 0) {
+      const rank0 = await fetchPriceSnapshot(url_name, 0).catch(() => null);
+      const rankMax = await fetchPriceSnapshot(url_name, maxRank).catch(() => null);
+      if (rank0) rankSnapshots.push({ rank: 0, snapshot: rank0 });
+      if (rankMax) rankSnapshots.push({ rank: maxRank, snapshot: rankMax });
+    }
+
+    res.json({ snapshot, rankSnapshots, queue: queueLength() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

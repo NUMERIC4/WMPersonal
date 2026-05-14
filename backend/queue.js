@@ -20,7 +20,14 @@ function processQueue() {
   })
     .then(async (res) => {
       const text = await res.text();
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
+      if (!res.ok) {
+        let body = null;
+        try { body = JSON.parse(text); } catch (_) { body = text; }
+        const error = new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
+        error.status = res.status;
+        error.body = body;
+        throw error;
+      }
       resolve(JSON.parse(text));
     })
     .catch(reject)

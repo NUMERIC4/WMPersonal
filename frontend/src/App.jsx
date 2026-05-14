@@ -34,6 +34,45 @@ function tradeTypeLabel(type) {
   return type === 0 ? "Sale" : type === 1 ? "Purchase" : "Trade";
 }
 
+function formatTradeItems(items) {
+  if (!items || items.length === 0) return "/";
+  return items.map(item => `${item.displayName ?? item.name} ×${item.cnt}`).join("\n");
+}
+
+function formatTradeDate(ts, type) {
+  const date = new Date(ts);
+  if (type === 1) { // Purchase
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+  return date.toLocaleString();
+}
+
+function evaluateMatch(order, compareOrders) {
+  if (!compareOrders || compareOrders.length === 0) return null;
+  
+  const key = order.item_slug || order.item_name;
+  if (!key) return null;
+
+  if (order.order_type === "sell") {
+    const baseBuy = compareOrders.find(o => o.order_type === "buy" && (o.item_slug === key || o.item_name === key));
+    if (!baseBuy) return null;
+    
+    if (order.platinum < baseBuy.platinum) return { type: "good", label: "Good", diff: baseBuy.platinum - order.platinum };
+    if (order.platinum === baseBuy.platinum) return { type: "acceptable", label: "Acceptable", diff: 0 };
+    return { type: "negotiable", label: "Negotiable", diff: order.platinum - baseBuy.platinum };
+  } else {
+    const baseSell = compareOrders.find(o => o.order_type === "sell" && (o.item_slug === key || o.item_name === key));
+    if (!baseSell) return null;
+    
+    if (order.platinum > baseSell.platinum) return { type: "good", label: "Good", diff: order.platinum - baseSell.platinum };
+    if (order.platinum === baseSell.platinum) return { type: "acceptable", label: "Acceptable", diff: 0 };
+    return { type: "negotiable", label: "Negotiable", diff: baseSell.platinum - order.platinum };
+  }
+}
+
 // ── Info Popup ────────────────────────────────────────────────────────────────
 function InfoPopup({ title, children, onClose }) {
   return (
@@ -49,11 +88,20 @@ function InfoPopup({ title, children, onClose }) {
   );
 }
 // ── Order Table ───────────────────────────────────────────────────────────────
-function OrderTable({ orders, onItemClick, showLive = false }) {
+function OrderTable({ orders, onItemClick, showLive = false, compareOrders = [] }) {
   const [sortKey, setSortKey]     = useState("item_name");
   const [sortDir, setSortDir]     = useState("asc");
   const [filter,  setFilter]      = useState("all");
   const [rankFilter, setRankFilter] = useState("all");
+
+  const compareSells = new Set(compareOrders.filter(o => o.order_type === "sell").map(o => o.item_slug || o.item_name || ""));
+  const compareBuys  = new Set(compareOrders.filter(o => o.order_type === "buy").map(o => o.item_slug || o.item_name || ""));
+
+  function isMatch(o) {
+    const key = o.item_slug || o.item_name;
+    if (!key) return false;
+    return o.order_type === "sell" ? compareBuys.has(key) : compareSells.has(key);
+  }
 
   function toggleSort(k) {
     if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -145,6 +193,7 @@ function OrderTable({ orders, onItemClick, showLive = false }) {
               {showLive && renderSortTh("Mkt Avg", "live_avg")}
               {renderSortTh("DB Min", "db_min")}
               {renderSortTh("DB Avg", "db_avg")}
+              <th>Match</th>
               {renderSortTh("Status", "status")}
               <th>Last Saved</th>
             </tr>
@@ -166,6 +215,16 @@ function OrderTable({ orders, onItemClick, showLive = false }) {
                   {showLive&&<td>{o.live?`${o.live.avg?.toFixed(1)} pt`:"/"}</td>}
                   <td>{latest?`${latest.min_price} pt`:"/"}</td>
                   <td>{latest?`${latest.avg_price} pt`:"/"}</td>
+                  <td>{compareOrders.length > 0 
+                    ? (() => {
+                        const m = evaluateMatch(o, compareOrders);
+                        if (!m) return "/";
+                        return <span className={`badge badge-${m.type}`}>
+                          {m.label} {m.diff > 0 && `(+${m.diff}pt)`}
+                        </span>;
+                      })()
+                    : "/"
+                  }</td>
                   <td><span className={`badge badge-${status}`}>
                     {status==="good"?"✓ Good":status==="warn"?"~ Even":status==="bad"?`✗ ${diff!==null?(diff>0?`+${diff}`:diff)+" pt":"Risk"}`:"—"}
                   </span></td>
@@ -323,6 +382,14 @@ export default function App() {
   const [activeSection,  setActiveSection]  = useState(null);
   const [itemHistories,  setItemHistories]  = useState({});
 
+  // View user (for comparison, not saved)
+  const [viewInput,     setViewInput]     = useState("");
+  const [viewSlug,      setViewSlug]      = useState("");
+  const [viewOrders,    setViewOrders]    = useState([]);
+  const [loadingView,   setLoadingView]   = useState(false);
+  const [viewError,     setViewError]     = useState("");
+  const [viewSection,   setViewSection]   = useState(null);
+
   // Favourites
   const [favs,        setFavs]        = useState([]);
   const [favInput,    setFavInput]    = useState("");
@@ -332,6 +399,14 @@ export default function App() {
   const [loadingFav,  setLoadingFav]  = useState(false);
   const [refreshing,  setRefreshing]  = useState(false);
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [baseFav,     setBaseFav]     = useState(null);
+  const [baseFavOrders, setBaseFavOrders] = useState([]);
+
+  // Trade Chat Builder
+  const [tradeSelected,    setTradeSelected]    = useState(new Set());
+  const [tradeCharLimit,   setTradeCharLimit]   = useState(500);
+  const [tradeFormat,      setTradeFormat]      = useState("WTS");
+  const [tradeChatOutput,  setTradeChatOutput]  = useState("");
 
   // Scanner
   const [scanGroups,   setScanGroups]   = useState({});
@@ -413,7 +488,8 @@ export default function App() {
     setSelected(item); setSnapshot(null); setHistory([]); setLoadingPrice(true);
     try {
       const [snap, hist] = await Promise.all([fetchPrice(item.url_name), getPriceHistory(item.url_name)]);
-      setSnapshot(snap.snapshot); setHistory(hist);
+      setSnapshot({ ...snap.snapshot, rankSnapshots: snap.rankSnapshots ?? [] });
+      setHistory(hist);
     } catch (e) { console.error(e); }
     setLoadingPrice(false);
   }
@@ -423,7 +499,7 @@ export default function App() {
     setTab("market"); setSearch(order.item_name);
     setSelected({id:order.item_slug, url_name:order.item_slug, item_name:order.item_name});
     setSnapshot(null); setHistory([]);
-    fetchPrice(order.item_slug).then(s=>setSnapshot(s.snapshot)).catch(console.error);
+    fetchPrice(order.item_slug).then(s=>setSnapshot({ ...s.snapshot, rankSnapshots: s.rankSnapshots ?? [] })).catch(console.error);
     getPriceHistory(order.item_slug).then(setHistory).catch(console.error);
   }
 
@@ -446,6 +522,59 @@ export default function App() {
     setLoadingUser(false);
   }
 
+  async function handleViewUserSearch() {
+    if (!viewInput.trim()) return;
+    setViewError(""); setViewOrders([]); setViewSlug("");
+    setLoadingView(true); setViewSection(null);
+    try {
+      const orders = await getUserOrders(viewInput.trim());
+      setViewOrders(orders);
+      setViewSlug(viewInput.trim());
+      if (!orders.length) {
+        setViewError("No orders found.");
+      }
+    } catch {
+      setViewError("User not found or API error.");
+    }
+    setLoadingView(false);
+  }
+
+  function generateTradeChat() {
+    const selectedOrders = baseFavOrders.filter(o => o.order_type === "sell" && tradeSelected.has(o.id));
+    if (selectedOrders.length === 0) {
+      setTradeChatOutput("");
+      return;
+    }
+
+    let message = `${tradeFormat}`;
+    let charCount = message.length;
+    const items = [];
+
+    for (const order of selectedOrders) {
+      const itemStr = ` [${order.item_name}] ${order.platinum}p`;
+      if (charCount + itemStr.length > tradeCharLimit) break;
+      items.push(itemStr);
+      charCount += itemStr.length;
+    }
+
+    message += items.join(",");
+    setTradeChatOutput(message);
+  }
+
+  function copyTradeChat() {
+    if (!tradeChatOutput) return;
+    navigator.clipboard.writeText(tradeChatOutput).then(() => {
+      alert("Trade chat message copied to clipboard!");
+    }).catch(e => console.error("Copy failed:", e));
+  }
+
+  function toggleTradeItem(orderId) {
+    const newSelected = new Set(tradeSelected);
+    if (newSelected.has(orderId)) newSelected.delete(orderId);
+    else newSelected.add(orderId);
+    setTradeSelected(newSelected);
+  }
+
   const enrichedUserOrders = userOrders.map(o=>({...o, history:itemHistories[o.item_slug]??[], live:null}));
 
   // ── Favourites ────────────────────────────────────────────────────────────
@@ -459,6 +588,14 @@ export default function App() {
     await removeFavourite(slug);
     if (activeFav===slug) { setActiveFav(null); setFavOrders([]); }
     getFavourites().then(setFavs);
+  }
+
+  async function handleSetBaseFav(username) {
+    setBaseFav(username);
+    setLoadingFav(true);
+    try { setBaseFavOrders(await getFavouriteOrders(username)); }
+    catch (e) { console.error(e); setBaseFavOrders([]); }
+    setLoadingFav(false);
   }
 
   async function handleSelectFav(slug) {
@@ -745,7 +882,7 @@ export default function App() {
         <h1>WMPersonal</h1>
         <p>Warframe Market Monitor</p>
         <div className="tabs">
-          {[["market","Market"],["user","User Orders"],["favs",`Favs${favs.length?` (${favs.length})`:""}`],["scanner","Scanner"],["profit","Profit"],["timeanalysis","Time Analysis"],["alecaframe","Alecaframe"],["groups","Group Manager"]].map(([t,l])=>(
+          {[["market","Market"],["user","User Orders"],["view","View User"],["favs",`Favs${favs.length?` (${favs.length})`:""}`],["scanner","Scanner"],["profit","Profit"],["timeanalysis","Time Analysis"],["alecaframe","Alecaframe"],["groups","Group Manager"]].map(([t,l])=>(
             <button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{l}</button>
           ))}
         </div>
@@ -772,22 +909,41 @@ export default function App() {
                 <code>{selected.url_name}</code>
                 {loadingPrice&&<p className="hint">Fetching live orders…</p>}
                 {snapshot&&(
-                  <div className="snapshot">
-                    <div className="stat"><span>Min</span><strong>{snapshot.min} pt</strong></div>
-                    <div className="stat"><span>Avg</span><strong>{snapshot.avg?.toFixed(1)} pt</strong></div>
-                    <div className="stat"><span>Max</span><strong>{snapshot.max} pt</strong></div>
-                    <div className="stat"><span>Online sellers</span><strong>{snapshot.volume}</strong></div>
-                  </div>
+                  <>
+                    <div className="snapshot">
+                      <div className="stat"><span>Min</span><strong>{snapshot.min} pt</strong></div>
+                      <div className="stat"><span>Avg</span><strong>{snapshot.avg?.toFixed(1)} pt</strong></div>
+                      <div className="stat"><span>Max</span><strong>{snapshot.max} pt</strong></div>
+                      <div className="stat"><span>Online sellers</span><strong>{snapshot.volume}</strong></div>
+                    </div>
+                    {snapshot.rankSnapshots?.length > 0 && (
+                      <div style={{marginTop:16}}>
+                        <h3 className="section-label">Rank-specific snapshots</h3>
+                        <div className="rank-snapshots-grid">
+                          {snapshot.rankSnapshots.map(rs => (
+                            <div key={rs.rank} className="snapshot rank-snapshot">
+                              <div className="stat"><span>Rank</span><strong>{rs.rank}</strong></div>
+                              <div className="stat"><span>Min</span><strong>{rs.snapshot.min} pt</strong></div>
+                              <div className="stat"><span>Avg</span><strong>{rs.snapshot.avg?.toFixed(1)} pt</strong></div>
+                              <div className="stat"><span>Max</span><strong>{rs.snapshot.max} pt</strong></div>
+                              <div className="stat"><span>Online sellers</span><strong>{rs.snapshot.volume}</strong></div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
                 <StatsPanel urlName={selected.url_name}/>
                 {history.length>0&&(
                   <>
                     <h3 className="section-label" style={{marginTop:16}}>Snapshot history</h3>
                     <table>
-                      <thead><tr><th>Time</th><th>Min</th><th>Avg</th><th>Max</th><th>Vol</th></tr></thead>
+                      <thead><tr><th>Time</th><th>Rank</th><th>Min</th><th>Avg</th><th>Max</th><th>Vol</th></tr></thead>
                       <tbody>{history.map(h=>(
                         <tr key={h.id}>
                           <td>{new Date(h.fetched_at).toLocaleTimeString()}</td>
+                          <td>{h.rank !== null ? h.rank : "—"}</td>
                           <td>{h.min_price}</td><td>{h.avg_price}</td><td>{h.max_price}</td><td>{h.volume}</td>
                         </tr>
                       ))}</tbody>
@@ -820,9 +976,39 @@ export default function App() {
                 <button className={`toggle-btn sell ${activeSection==="sell"?"active":""}`} onClick={()=>setActiveSection(p=>p==="sell"?null:"sell")}>Selling ({userSells.length})</button>
                 <button className={`toggle-btn buy  ${activeSection==="buy" ?"active":""}`} onClick={()=>setActiveSection(p=>p==="buy" ?null:"buy" )}>Buying ({userBuys.length})</button>
               </div>
-              {activeSection==="sell"&&<OrderTable orders={userSells} onItemClick={jumpToItem} showLive={false}/>}
-              {activeSection==="buy" &&<OrderTable orders={userBuys}  onItemClick={jumpToItem} showLive={false}/>}
+              {baseFav && userSlug && userSlug !== baseFav && <p className="hint">Comparing {userSlug} against base user {baseFav}.</p>}
+              {activeSection==="sell"&&<OrderTable orders={userSells} onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && activeFav === baseFav ? favOrders : []}/>}
+              {activeSection==="buy" &&<OrderTable orders={userBuys}  onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && activeFav === baseFav ? favOrders : []}/>}
               {!activeSection&&<p className="hint" style={{marginTop:24}}>Click Selling or Buying to expand.</p>}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── VIEW USER ── */}
+      {tab==="view"&&(
+        <div className="user-page">
+          <div className="user-search">
+            <input placeholder="Enter username to view..." value={viewInput}
+              onChange={e=>setViewInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleViewUserSearch()}/>
+            <button onClick={handleViewUserSearch}>View</button>
+          </div>
+          {loadingView&&<p className="hint">Fetching orders…</p>}
+          {viewError&&<p className="hint">{viewError}</p>}
+          {viewOrders.length>0&&(
+            <>
+              <div className="user-header-row">
+                <h2 className="user-title">{viewSlug}</h2>
+                <button className="fav-add-btn" onClick={()=>addFavourite(viewSlug).then(()=>getFavourites().then(setFavs))}>★ Add to Favourites</button>
+              </div>
+              {baseFav && viewSlug !== baseFav && <p className="hint">Comparing {viewSlug} against base user {baseFav}.</p>}
+              <div className="section-toggles">
+                <button className={`toggle-btn sell ${viewSection==="sell"?"active":""}`} onClick={()=>setViewSection(p=>p==="sell"?null:"sell")}>Selling ({viewOrders.filter(o=>o.order_type==="sell").length})</button>
+                <button className={`toggle-btn buy  ${viewSection==="buy" ?"active":""}`} onClick={()=>setViewSection(p=>p==="buy" ?null:"buy" )}>Buying ({viewOrders.filter(o=>o.order_type==="buy").length})</button>
+              </div>
+              {viewSection==="sell"&&<OrderTable orders={viewOrders.filter(o=>o.order_type==="sell")} onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && favOrders.length > 0 ? favOrders : []}/>}
+              {viewSection==="buy" &&<OrderTable orders={viewOrders.filter(o=>o.order_type==="buy")}  onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && favOrders.length > 0 ? favOrders : []}/>}
+              {!viewSection&&<p className="hint" style={{marginTop:24}}>Click Selling or Buying to expand.</p>}
             </>
           )}
         </div>
@@ -841,31 +1027,140 @@ export default function App() {
               {refreshing?"Refreshing…":"↻ Refresh All"}
             </button>
           </div>
-          {lastRefresh&&<p className="hint" style={{marginBottom:12}}>Last refreshed: {lastRefresh.toLocaleTimeString()}</p>}
-          {favs.length===0&&<p className="hint">No favourites yet.</p>}
-          <div className="fav-list">
-            {favs.map(f=>(
-              <div key={f.slug} className={`fav-item ${activeFav===f.slug?"active":""}`}>
-                <span className="fav-name" onClick={()=>handleSelectFav(f.slug)}>{f.slug}</span>
-                <button className="fav-remove" onClick={()=>handleRemoveFav(f.slug)}>✕</button>
-              </div>
-            ))}
-          </div>
+          {favs.length > 0 && (
+            <div className="fav-list">
+              {favs.map(fav => (
+                <div
+                  key={fav.slug}
+                  className={`fav-item ${activeFav === fav.slug ? "active" : ""}`}
+                  onClick={() => handleSelectFav(fav.slug)}
+                >
+                  <span className="fav-name">{fav.slug}</span>
+                  <button
+                    className="fav-remove"
+                    onClick={(e) => { e.stopPropagation(); handleRemoveFav(fav.slug); }}
+                    title="Remove favourite"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {baseFav && <p className="hint" style={{marginBottom:12}}>Base user: <strong>{baseFav}</strong></p>}
           {loadingFav&&<p className="hint" style={{marginTop:24}}>Fetching orders and live prices…</p>}
           {activeFav&&!loadingFav&&favOrders.length>0&&(
             <>
               <h2 className="user-title" style={{marginTop:24}}>{activeFav}</h2>
+              <div style={{marginBottom: 12}}>
+                <button className="refresh-btn" onClick={()=>handleSetBaseFav(activeFav)} disabled={baseFav === activeFav}>
+                  {baseFav === activeFav ? "✓ Base User" : "Set as Base"}
+                </button>
+              </div>
               <div className="section-toggles">
                 <button className={`toggle-btn sell ${favSection==="sell"?"active":""}`} onClick={()=>setFavSection(p=>p==="sell"?null:"sell")}>Selling ({favSells.length})</button>
                 <button className={`toggle-btn buy  ${favSection==="buy" ?"active":""}`} onClick={()=>setFavSection(p=>p==="buy" ?null:"buy" )}>Buying ({favBuys.length})</button>
+                <button className={`toggle-btn chat ${favSection==="chat"?"active":""}`} onClick={()=>{setFavSection(p=>p==="chat"?null:"chat"); setTradeSelected(new Set()); generateTradeChat();}}>Build Trade Chat</button>
               </div>
-              {favSection==="sell"&&<OrderTable orders={favSells} onItemClick={jumpToItem} showLive={true}/>}
-              {favSection==="buy" &&<OrderTable orders={favBuys}  onItemClick={jumpToItem} showLive={true}/>}
-              {!favSection&&<p className="hint" style={{marginTop:24}}>Click Selling or Buying to expand.</p>}
+              {favSection==="sell"&&<OrderTable orders={favSells} onItemClick={jumpToItem} showLive={true} compareOrders={[]}/>}
+              {favSection==="buy" &&<OrderTable orders={favBuys}  onItemClick={jumpToItem} showLive={true} compareOrders={[]}/>}
+              {favSection==="chat" && (
+                <div className="trade-builder">
+                  <div style={{marginBottom: 16}}>
+                    <label style={{display: "block", marginBottom: 8, color: "#888"}}>Format Type:</label>
+                    <select value={tradeFormat} onChange={e => setTradeFormat(e.target.value)} style={{padding: "6px 12px", background: "#1c1f2b", border: "1px solid #2a2d3a", borderRadius: "4px", color: "#c8a96e", cursor: "pointer"}}>
+                      <option value="WTS">WTS (Want To Sell)</option>
+                      <option value="WTB">WTB (Want To Buy)</option>
+                      <option value="PC">PC (Price Check)</option>
+                    </select>
+                  </div>
+                  <div style={{marginBottom: 16}}>
+                    <label style={{display: "block", marginBottom: 8, color: "#888"}}>Character Limit:</label>
+                    <input type="number" min="100" max="2000" value={tradeCharLimit} onChange={e => setTradeCharLimit(parseInt(e.target.value))} 
+                      style={{padding: "6px 12px", background: "#1c1f2b", border: "1px solid #2a2d3a", borderRadius: "4px", color: "#c8a96e", width: "100%"}}/>
+                  </div>
+                  <div style={{marginBottom: 16}}>
+                    <h3 style={{color: "#c8a96e", marginBottom: 12}}>Select Items from Base User ({baseFav}):</h3>
+                    <div className="trade-items-list">
+                      {baseFavOrders.filter(o => o.order_type === "sell").map(order => (
+                        <div key={order.id} className="trade-item-row">
+                          <input type="checkbox" id={`trade-${order.id}`} checked={tradeSelected.has(order.id)} 
+                            onChange={() => { toggleTradeItem(order.id); generateTradeChat(); }} />
+                          <label htmlFor={`trade-${order.id}`} style={{flex: 1, display: "flex", alignItems: "center", gap: 12, cursor: "pointer"}}>
+                            <span>{order.item_name}</span>
+                            <span style={{color: "#888", fontSize: "0.85rem"}}>{order.platinum}p</span>
+                            <span style={{color: "#666", fontSize: "0.8rem"}}>×{order.quantity}</span>
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {tradeChatOutput && (
+                    <div style={{marginBottom: 16}}>
+                      <h3 style={{color: "#c8a96e", marginBottom: 8}}>Preview:</h3>
+                      <div style={{background: "#1c1f2b", border: "1px solid #2a2d3a", borderRadius: "6px", padding: "12px", fontFamily: "monospace", color: "#70b870", wordBreak: "break-word"}}>
+                        {tradeChatOutput}
+                      </div>
+                      <p style={{color: "#666", fontSize: "0.8rem", marginTop: 6}}>Length: {tradeChatOutput.length}/{tradeCharLimit}</p>
+                    </div>
+                  )}
+                  <button onClick={copyTradeChat} disabled={!tradeChatOutput} style={{padding: "8px 16px", background: "#1c1f2b", border: "1px solid #2a2d3a", borderRadius: "6px", color: "#c8a96e", cursor: tradeChatOutput ? "pointer" : "default", opacity: tradeChatOutput ? 1 : 0.5}}>
+                    📋 Copy to Clipboard
+                  </button>
+                </div>
+              )}
+              {!favSection&&<p className="hint" style={{marginTop:24}}>Click Selling, Buying, or Build Trade Chat to expand.</p>}
             </>
+          )}
+          {baseFav && !activeFav && (
+            <div className="trade-builder-standalone">
+              <h2 style={{color: "#c8a96e", marginBottom: 16}}>Trade Chat Builder - Base User: {baseFav}</h2>
+              <div style={{marginBottom: 16}}>
+                <label style={{display: "block", marginBottom: 8, color: "#888"}}>Format Type:</label>
+                <select value={tradeFormat} onChange={e => setTradeFormat(e.target.value)} style={{padding: "6px 12px", background: "#1c1f2b", border: "1px solid #2a2d3a", borderRadius: "4px", color: "#c8a96e", cursor: "pointer"}}>
+                  <option value="WTS">WTS (Want To Sell)</option>
+                  <option value="WTB">WTB (Want To Buy)</option>
+                  <option value="PC">PC (Price Check)</option>
+                </select>
+              </div>
+              <div style={{marginBottom: 16}}>
+                <label style={{display: "block", marginBottom: 8, color: "#888"}}>Character Limit:</label>
+                <input type="number" min="100" max="2000" value={tradeCharLimit} onChange={e => setTradeCharLimit(parseInt(e.target.value))} 
+                  style={{padding: "6px 12px", background: "#1c1f2b", border: "1px solid #2a2d3a", borderRadius: "4px", color: "#c8a96e", width: "100%"}}/>
+              </div>
+              <div style={{marginBottom: 16}}>
+                <h3 style={{color: "#c8a96e", marginBottom: 12}}>Select Items to List:</h3>
+                <div className="trade-items-list">
+                  {baseFavOrders.filter(o => o.order_type === "sell").map(order => (
+                    <div key={order.id} className="trade-item-row">
+                      <input type="checkbox" id={`trade-${order.id}`} checked={tradeSelected.has(order.id)} 
+                        onChange={() => { toggleTradeItem(order.id); generateTradeChat(); }} />
+                      <label htmlFor={`trade-${order.id}`} style={{flex: 1, display: "flex", alignItems: "center", gap: 12, cursor: "pointer"}}>
+                        <span>{order.item_name}</span>
+                        <span style={{color: "#888", fontSize: "0.85rem"}}>{order.platinum}p</span>
+                        <span style={{color: "#666", fontSize: "0.8rem"}}>×{order.quantity}</span>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {tradeChatOutput && (
+                <div style={{marginBottom: 16}}>
+                  <h3 style={{color: "#c8a96e", marginBottom: 8}}>Preview:</h3>
+                  <div style={{background: "#1c1f2b", border: "1px solid #2a2d3a", borderRadius: "6px", padding: "12px", fontFamily: "monospace", color: "#70b870", wordBreak: "break-word"}}>
+                    {tradeChatOutput}
+                  </div>
+                  <p style={{color: "#666", fontSize: "0.8rem", marginTop: 6}}>Length: {tradeChatOutput.length}/{tradeCharLimit}</p>
+                </div>
+              )}
+              <button onClick={copyTradeChat} disabled={!tradeChatOutput} style={{padding: "8px 16px", background: "#1c1f2b", border: "1px solid #2a2d3a", borderRadius: "6px", color: "#c8a96e", cursor: tradeChatOutput ? "pointer" : "default", opacity: tradeChatOutput ? 1 : 0.5}}>
+                📋 Copy to Clipboard
+              </button>
+            </div>
           )}
         </div>
       )}
+
 
       {/* ── SCANNER ── */}
       {tab==="scanner"&&(
@@ -1091,11 +1386,11 @@ export default function App() {
                   <tbody>
                     {alecaTrades.slice(0, 40).map((trade,i)=>(
                       <tr key={`${trade.ts}-${i}`}>
-                        <td className="ts-cell">{new Date(trade.ts).toLocaleString()}</td>
+                        <td className="ts-cell">{formatTradeDate(trade.ts, trade.type)}</td>
                         <td>{tradeTypeLabel(trade.type)}</td>
                         <td>{trade.user ?? "/"}</td>
-                        <td>{(trade.rx??[]).map(item=>`${item.displayName??item.name} x${item.cnt}`).join(", ") || "/"}</td>
-                        <td>{(trade.tx??[]).map(item=>`${item.displayName??item.name} x${item.cnt}`).join(", ") || "/"}</td>
+                        <td style={{whiteSpace: "pre-line"}}>{formatTradeItems(trade.rx)}</td>
+                        <td style={{whiteSpace: "pre-line"}}>{formatTradeItems(trade.tx)}</td>
                         <td>{trade.totalPlat ?? "/"}</td>
                       </tr>
                     ))}
