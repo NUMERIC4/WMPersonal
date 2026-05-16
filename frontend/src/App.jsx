@@ -605,6 +605,27 @@ export default function App() {
     setLoadingFav(false);
   }
 
+  async function handleOpenFavUser(slug) {
+    setTab("user");
+    setUserInput(slug); setUserSlug(slug); setUserOrders([]); setUserError("");
+    setLoadingUser(true); setActiveSection(null); setItemHistories({});
+    try {
+      const orders = await getUserOrders(slug);
+      setUserOrders(orders);
+      if (!orders.length) {
+        setUserError("No orders found.");
+      } else {
+        const slugs = [...new Set(orders.map(o => o.item_slug).filter(Boolean))];
+        const res = {};
+        await Promise.all(slugs.map(s => getPriceHistory(s).then(h => { res[s] = h; }).catch(() => { res[s] = []; })));
+        setItemHistories(res);
+      }
+    } catch {
+      setUserError("User not found or API error.");
+    }
+    setLoadingUser(false);
+  }
+
   async function handleManualRefresh() {
     setRefreshing(true);
     try { await refreshFavourites(); setLastRefresh(new Date()); if (activeFav) await handleSelectFav(activeFav); }
@@ -636,22 +657,21 @@ export default function App() {
           ...prev,
           [scanGroup]: { done:msg.done, total:msg.total, isLast:false }
         }));
-        if (msg.snap) {
-          const standingCost = msg.standing_cost ?? null;
-          const minPlatPerKStanding = platPerKStanding(msg.snap.min, standingCost);
-          const avgPlatPerKStanding = platPerKStanding(msg.snap.avg, standingCost);
-          setGroupResults(prev => ({
-            ...prev,
-            [scanGroup]: [...(prev[scanGroup]??[]), {
-              item: msg.item,
-              url_name: msg.snap?.url_name,
-              standingCost,
-              minPlatPerKStanding,
-              avgPlatPerKStanding,
-              ...msg.snap,
-            }]
-          }));
-        }
+        const standingCost = msg.standing_cost ?? null;
+        const snap = msg.snap ?? { url_name: item.url_name, min: null, avg: null, max: null, volume: null };
+        const minPlatPerKStanding = platPerKStanding(snap.min, standingCost);
+        const avgPlatPerKStanding = platPerKStanding(snap.avg, standingCost);
+        setGroupResults(prev => ({
+          ...prev,
+          [scanGroup]: [...(prev[scanGroup]??[]), {
+            item: msg.item,
+            url_name: snap.url_name ?? item.url_name,
+            standingCost,
+            minPlatPerKStanding,
+            avgPlatPerKStanding,
+            ...snap,
+          }]
+        }));
       }
       if (msg.type === "done" || msg.type === "cancelled") {
         setScanRunning(false); es.close();
@@ -977,8 +997,8 @@ export default function App() {
                 <button className={`toggle-btn buy  ${activeSection==="buy" ?"active":""}`} onClick={()=>setActiveSection(p=>p==="buy" ?null:"buy" )}>Buying ({userBuys.length})</button>
               </div>
               {baseFav && userSlug && userSlug !== baseFav && <p className="hint">Comparing {userSlug} against base user {baseFav}.</p>}
-              {activeSection==="sell"&&<OrderTable orders={userSells} onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && activeFav === baseFav ? favOrders : []}/>}
-              {activeSection==="buy" &&<OrderTable orders={userBuys}  onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && activeFav === baseFav ? favOrders : []}/>}
+              {activeSection==="sell"&&<OrderTable orders={userSells} onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && baseFavOrders.length > 0 ? baseFavOrders : []}/>}
+              {activeSection==="buy" &&<OrderTable orders={userBuys}  onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && baseFavOrders.length > 0 ? baseFavOrders : []}/>}
               {!activeSection&&<p className="hint" style={{marginTop:24}}>Click Selling or Buying to expand.</p>}
             </>
           )}
@@ -1006,8 +1026,8 @@ export default function App() {
                 <button className={`toggle-btn sell ${viewSection==="sell"?"active":""}`} onClick={()=>setViewSection(p=>p==="sell"?null:"sell")}>Selling ({viewOrders.filter(o=>o.order_type==="sell").length})</button>
                 <button className={`toggle-btn buy  ${viewSection==="buy" ?"active":""}`} onClick={()=>setViewSection(p=>p==="buy" ?null:"buy" )}>Buying ({viewOrders.filter(o=>o.order_type==="buy").length})</button>
               </div>
-              {viewSection==="sell"&&<OrderTable orders={viewOrders.filter(o=>o.order_type==="sell")} onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && favOrders.length > 0 ? favOrders : []}/>}
-              {viewSection==="buy" &&<OrderTable orders={viewOrders.filter(o=>o.order_type==="buy")}  onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && favOrders.length > 0 ? favOrders : []}/>}
+              {viewSection==="sell"&&<OrderTable orders={viewOrders.filter(o=>o.order_type==="sell")} onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && baseFavOrders.length > 0 ? baseFavOrders : []}/>}
+              {viewSection==="buy" &&<OrderTable orders={viewOrders.filter(o=>o.order_type==="buy")}  onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && baseFavOrders.length > 0 ? baseFavOrders : []}/>}
               {!viewSection&&<p className="hint" style={{marginTop:24}}>Click Selling or Buying to expand.</p>}
             </>
           )}
@@ -1033,7 +1053,7 @@ export default function App() {
                 <div
                   key={fav.slug}
                   className={`fav-item ${activeFav === fav.slug ? "active" : ""}`}
-                  onClick={() => handleSelectFav(fav.slug)}
+                  onClick={() => handleOpenFavUser(fav.slug)}
                 >
                   <span className="fav-name">{fav.slug}</span>
                   <button
@@ -1228,13 +1248,13 @@ export default function App() {
                       {viewResults.map((r,i)=>(
                         <tr key={i}>
                           <td><span className="item-link" onClick={()=>{setTab("market");setSearch(r.item);setSelected({id:r.url_name,url_name:r.url_name,item_name:r.item});}}>{r.item}</span></td>
-                          <td>{r.min} pt</td>
-                          <td>{r.avg} pt</td>
-                          <td>{r.max} pt</td>
-                          <td>{r.volume}</td>
-                          <td>{r.standingCost?r.standingCost.toLocaleString():"/"}</td>
-                          <td>{r.minPlatPerKStanding!=null?`${r.minPlatPerKStanding} pt`:"/"}</td>
-                          <td>{r.avgPlatPerKStanding!=null?`${r.avgPlatPerKStanding} pt`:"/"}</td>
+                          <td>{r.min != null ? `${r.min} pt` : "/"}</td>
+                          <td>{r.avg != null ? `${r.avg} pt` : "/"}</td>
+                          <td>{r.max != null ? `${r.max} pt` : "/"}</td>
+                          <td>{r.volume != null ? r.volume : "/"}</td>
+                          <td>{r.standingCost ? r.standingCost.toLocaleString() : "/"}</td>
+                          <td>{r.minPlatPerKStanding != null ? `${r.minPlatPerKStanding} pt` : "/"}</td>
+                          <td>{r.avgPlatPerKStanding != null ? `${r.avgPlatPerKStanding} pt` : "/"}</td>
                         </tr>
                       ))}
                     </tbody>
