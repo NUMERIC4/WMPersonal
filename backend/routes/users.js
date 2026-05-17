@@ -1,14 +1,14 @@
 import { Router } from "express";
 import { getDb } from "../db.js";
-import { queueFetch } from "../queue.js";
+import { fetchUserOrders } from "../userFetch.js";
 
 const router = Router();
 
 router.get("/:slug/orders", async (req, res) => {
   const { slug } = req.params;
   try {
-    const json = await queueFetch(`https://api.warframe.market/v2/orders/user/${slug}`);
-    const orders = json.data ?? [];
+    const json = await fetchUserOrders((slug || "").toLowerCase());
+    const orders = (json && json.data) ? json.data : [];
     const db = getDb();
 
     const enriched = orders.map((o) => {

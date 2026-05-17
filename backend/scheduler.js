@@ -1,6 +1,6 @@
 import { getDb } from "./db.js";
-import { queueFetch } from "./queue.js";
 import { fetchPriceSnapshot } from "./sync.js";
+import { fetchUserOrders } from "./userFetch.js";
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 let running = false;
@@ -30,9 +30,10 @@ export async function refreshFavourites() {
   }
 
   for (const { slug } of favs) {
+    const canonical = (slug || "").trim().toLowerCase();
     try {
-      const json = await queueFetch(`https://api.warframe.market/v2/orders/user/${slug}`);
-      const orders = json.data ?? [];
+      const json = await fetchUserOrders(canonical);
+      const orders = (json && json.data) ? json.data : [];
 
       // Fetch price snapshot for each unique item slug
       const slugs = [...new Set(
@@ -52,12 +53,12 @@ export async function refreshFavourites() {
         }
       }
 
-      console.log(`  ${slug}: ${orders.length} orders, ${fetched} snapshots saved.`);
-      results.push({ slug, orders: orders.length, snapshots: fetched });
+      console.log(`  ${canonical}: ${orders.length} orders, ${fetched} snapshots saved.`);
+      results.push({ slug: canonical, orders: orders.length, snapshots: fetched });
     } catch (e) {
       const message = extractErrorMessage(e);
-      console.error(`  Failed to refresh ${slug}: ${message}`);
-      results.push({ slug, error: message });
+      console.error(`  Failed to refresh ${canonical}: ${message}`);
+      results.push({ slug: canonical, error: message });
     }
   }
 

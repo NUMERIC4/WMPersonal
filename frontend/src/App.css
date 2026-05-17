@@ -111,6 +111,18 @@ th, td {
 th { color: #666; font-weight: normal; font-size: 0.75rem; }
 tr:hover td { background: #1a1d26; }
 
+.rank-snapshots-table-wrap { overflow-x: auto; margin-top: 12px; }
+.rank-snapshots-table button.rank-link {
+  background: transparent;
+  border: none;
+  color: #c8a96e;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font: inherit;
+}
+.rank-snapshots-table button.rank-link:hover { color: #d4b87a; }
+
 /* Tabs */
 .tabs { margin-top: 10px; display: flex; gap: 8px; }
 .tabs button {

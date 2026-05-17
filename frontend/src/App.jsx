@@ -109,14 +109,15 @@ function OrderTable({ orders, onItemClick, showLive = false, compareOrders = [] 
   }
 
   function getStatus(o) {
-    if (!o.live) return "neutral";
+    const marketMin = o.live?.min ?? (o.history && o.history.length ? o.history[0].min_price : null);
+    if (marketMin === null || marketMin === undefined) return "neutral";
     if (o.order_type === "sell") {
-      if (o.platinum < o.live.min)   return "bad";
-      if (o.platinum === o.live.min) return "warn";
+      if (o.platinum < marketMin)   return "bad";
+      if (o.platinum === marketMin) return "warn";
       return "good";
     } else {
-      if (o.platinum > o.live.min)   return "bad";
-      if (o.platinum === o.live.min) return "warn";
+      if (o.platinum > marketMin)   return "bad";
+      if (o.platinum === marketMin) return "warn";
       return "good";
     }
   }
@@ -225,9 +226,17 @@ function OrderTable({ orders, onItemClick, showLive = false, compareOrders = [] 
                       })()
                     : "/"
                   }</td>
-                  <td><span className={`badge badge-${status}`}>
-                    {status==="good"?"✓ Good":status==="warn"?"~ Even":status==="bad"?`✗ ${diff!==null?(diff>0?`+${diff}`:diff)+" pt":"Risk"}`:"—"}
-                  </span></td>
+                      <td>
+                        {(() => {
+                          const marketMin = o.live?.min ?? (o.history && o.history.length ? o.history[0].min_price : null);
+                          const diff = marketMin !== null && marketMin !== undefined ? (o.platinum - marketMin) : null;
+                          return (
+                            <span className={`badge badge-${status}`}>
+                              {status === "good" ? "✓ Good" : status === "warn" ? "~ Even" : status === "bad" ? `✗ ${diff!==null?(diff>0?`+${diff}`:diff)+" pt":"Risk"}` : "—"}
+                            </span>
+                          );
+                        })()}
+                      </td>
                   <td className="ts-cell">{latest?new Date(latest.fetched_at).toLocaleString():"/"}</td>
                 </tr>
               );
@@ -369,6 +378,7 @@ export default function App() {
   const [search,       setSearch]       = useState("");
   const [items,        setItems]        = useState([]);
   const [selected,     setSelected]     = useState(null);
+  const [selectedRank, setSelectedRank] = useState(null);
   const [snapshot,     setSnapshot]     = useState(null);
   const [history,      setHistory]      = useState([]);
   const [loadingPrice, setLoadingPrice] = useState(false);
@@ -381,6 +391,7 @@ export default function App() {
   const [userError,      setUserError]      = useState("");
   const [activeSection,  setActiveSection]  = useState(null);
   const [itemHistories,  setItemHistories]  = useState({});
+  const [itemLives,      setItemLives]      = useState({});
 
   // View user (for comparison, not saved)
   const [viewInput,     setViewInput]     = useState("");
@@ -484,13 +495,23 @@ export default function App() {
   }, [gmSearch]);
 
   // ── Market ────────────────────────────────────────────────────────────────
-  async function handleSelect(item) {
-    setSelected(item); setSnapshot(null); setHistory([]); setLoadingPrice(true);
+  async function handleSelect(item, rank = null) {
+    setSearch(item.item_name ?? "");
+    setSelected(item);
+    setSelectedRank(rank);
+    setSnapshot(null);
+    setHistory([]);
+    setLoadingPrice(true);
     try {
-      const [snap, hist] = await Promise.all([fetchPrice(item.url_name), getPriceHistory(item.url_name)]);
+      const [snap, hist] = await Promise.all([
+        fetchPrice(item.url_name, rank),
+        getPriceHistory(item.url_name),
+      ]);
       setSnapshot({ ...snap.snapshot, rankSnapshots: snap.rankSnapshots ?? [] });
       setHistory(hist);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
     setLoadingPrice(false);
   }
 
@@ -513,10 +534,13 @@ export default function App() {
       setUserOrders(orders);
       if (!orders.length) { setUserError("No orders found."); }
       else {
-        const slugs = [...new Set(orders.map(o=>o.item_slug).filter(Boolean))];
-        const res = {};
-        await Promise.all(slugs.map(s=>getPriceHistory(s).then(h=>{res[s]=h;}).catch(()=>{res[s]=[];})));
-        setItemHistories(res);
+          const slugs = [...new Set(orders.map(o=>o.item_slug).filter(Boolean))];
+          const res = {};
+          await Promise.all(slugs.map(s=>getPriceHistory(s).then(h=>{res[s]=h;}).catch(()=>{res[s]=[];})));
+          setItemHistories(res);
+          const liveRes = {};
+          await Promise.all(slugs.map(s=>fetchPrice(s).then(r=>{ liveRes[s] = (r && r.snapshot) ? r.snapshot : r; }).catch(()=>{ liveRes[s] = null; })));
+          setItemLives(liveRes);
       }
     } catch { setUserError("User not found or API error."); }
     setLoadingUser(false);
@@ -528,7 +552,14 @@ export default function App() {
     setLoadingView(true); setViewSection(null);
     try {
       const orders = await getUserOrders(viewInput.trim());
-      setViewOrders(orders);
+      // fetch histories and live snapshots for the items in this view
+      const slugs = [...new Set(orders.map(o => o.item_slug).filter(Boolean))];
+      const res = {};
+      await Promise.all(slugs.map(s => getPriceHistory(s).then(h => { res[s] = h; }).catch(() => { res[s] = []; })));
+      const liveRes = {};
+      await Promise.all(slugs.map(s => fetchPrice(s).then(r => { liveRes[s] = (r && r.snapshot) ? r.snapshot : r; }).catch(() => { liveRes[s] = null; })));
+      const enriched = orders.map(o => ({ ...o, history: res[o.item_slug] ?? [], live: liveRes[o.item_slug] ?? null }));
+      setViewOrders(enriched);
       setViewSlug(viewInput.trim());
       if (!orders.length) {
         setViewError("No orders found.");
@@ -575,7 +606,7 @@ export default function App() {
     setTradeSelected(newSelected);
   }
 
-  const enrichedUserOrders = userOrders.map(o=>({...o, history:itemHistories[o.item_slug]??[], live:null}));
+  const enrichedUserOrders = userOrders.map(o=>({...o, history:itemHistories[o.item_slug]??[], live: itemLives[o.item_slug] ?? null}));
 
   // ── Favourites ────────────────────────────────────────────────────────────
   async function handleAddFav() {
@@ -615,10 +646,13 @@ export default function App() {
       if (!orders.length) {
         setUserError("No orders found.");
       } else {
-        const slugs = [...new Set(orders.map(o => o.item_slug).filter(Boolean))];
-        const res = {};
-        await Promise.all(slugs.map(s => getPriceHistory(s).then(h => { res[s] = h; }).catch(() => { res[s] = []; })));
-        setItemHistories(res);
+          const slugs = [...new Set(orders.map(o => o.item_slug).filter(Boolean))];
+          const res = {};
+          await Promise.all(slugs.map(s => getPriceHistory(s).then(h => { res[s] = h; }).catch(() => { res[s] = []; })));
+          setItemHistories(res);
+          const liveRes = {};
+          await Promise.all(slugs.map(s => fetchPrice(s).then(r => { liveRes[s] = (r && r.snapshot) ? r.snapshot : r; }).catch(() => { liveRes[s] = null; })));
+          setItemLives(liveRes);
       }
     } catch {
       setUserError("User not found or API error.");
@@ -927,6 +961,7 @@ export default function App() {
               <>
                 <h2>{selected.item_name}</h2>
                 <code>{selected.url_name}</code>
+                {selectedRank !== null && <p className="hint">Showing market snapshot for rank {selectedRank} only.</p>}
                 {loadingPrice&&<p className="hint">Fetching live orders…</p>}
                 {snapshot&&(
                   <>
@@ -939,17 +974,61 @@ export default function App() {
                     {snapshot.rankSnapshots?.length > 0 && (
                       <div style={{marginTop:16}}>
                         <h3 className="section-label">Rank-specific snapshots</h3>
-                        <div className="rank-snapshots-grid">
-                          {snapshot.rankSnapshots.map(rs => (
-                            <div key={rs.rank} className="snapshot rank-snapshot">
-                              <div className="stat"><span>Rank</span><strong>{rs.rank}</strong></div>
-                              <div className="stat"><span>Min</span><strong>{rs.snapshot.min} pt</strong></div>
-                              <div className="stat"><span>Avg</span><strong>{rs.snapshot.avg?.toFixed(1)} pt</strong></div>
-                              <div className="stat"><span>Max</span><strong>{rs.snapshot.max} pt</strong></div>
-                              <div className="stat"><span>Online sellers</span><strong>{rs.snapshot.volume}</strong></div>
+                        {(() => {
+                          const rank0 = snapshot.rankSnapshots.find(rs => rs.rank === 0);
+                          const rankMax = snapshot.rankSnapshots.find(rs => rs.rank !== 0);
+                          if (!rank0 && !rankMax) return null;
+                          return (
+                            <div className="rank-snapshots-table-wrap">
+                              <table className="rank-snapshots-table">
+                                <thead>
+                                  <tr>
+                                    <th>Arcane</th>
+                                    <th>R0 Min</th>
+                                    <th>R0 Avg</th>
+                                    <th>Rmax Min</th>
+                                    <th>Rmax Avg</th>
+                                    <th>Online sellers</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr>
+                                    <td>{selected?.item_name}</td>
+                                    <td>
+                                      {rank0 ? (
+                                        <button className="rank-link" onClick={() => handleSelect(selected, 0)}>
+                                          {rank0.snapshot.min} pt
+                                        </button>
+                                      ) : "/"}
+                                    </td>
+                                    <td>
+                                      {rank0 ? (
+                                        <button className="rank-link" onClick={() => handleSelect(selected, 0)}>
+                                          {rank0.snapshot.avg?.toFixed(1)} pt
+                                        </button>
+                                      ) : "/"}
+                                    </td>
+                                    <td>
+                                      {rankMax ? (
+                                        <button className="rank-link" onClick={() => handleSelect(selected, rankMax.rank)}>
+                                          {rankMax.snapshot.min} pt
+                                        </button>
+                                      ) : "/"}
+                                    </td>
+                                    <td>
+                                      {rankMax ? (
+                                        <button className="rank-link" onClick={() => handleSelect(selected, rankMax.rank)}>
+                                          {rankMax.snapshot.avg?.toFixed(1)} pt
+                                        </button>
+                                      ) : "/"}
+                                    </td>
+                                    <td>{rank0?.snapshot.volume ?? rankMax?.snapshot.volume ?? "-"}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
                             </div>
-                          ))}
-                        </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </>

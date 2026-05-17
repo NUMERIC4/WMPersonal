@@ -8,8 +8,8 @@ export const getItems = (search = "") =>
 export const syncMarketItems = () =>
   axios.post(`${API_BASE}/items/sync`).then(r => r.data);
 
-export const fetchPrice = (url_name) =>
-  axios.post(`${API_BASE}/prices/fetch`, { url_name }).then(r => r.data);
+export const fetchPrice = (url_name, rank = null) =>
+  axios.post(`${API_BASE}/prices/fetch`, { url_name, rank }).then(r => r.data);
 
 export const getPriceHistory = (url_name) =>
   axios.get(`${API_BASE}/prices/${url_name}`).then(r => r.data);

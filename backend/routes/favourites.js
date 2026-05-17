@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getDb } from "../db.js";
-import { queueFetch } from "../queue.js";
+import { fetchUserOrders } from "../userFetch.js";
 import { fetchPriceSnapshot } from "../sync.js";
 import { refreshFavourites } from "../scheduler.js";
 
@@ -14,13 +14,15 @@ router.get("/", (req, res) => {
 router.post("/", (req, res) => {
   const { slug } = req.body;
   if (!slug) return res.status(400).json({ error: "slug required" });
-  getDb().prepare("INSERT OR IGNORE INTO favourite_users (slug) VALUES (?)").run(slug.trim());
-  res.json({ slug });
+  const canonical = slug.trim().toLowerCase();
+  getDb().prepare("INSERT OR IGNORE INTO favourite_users (slug) VALUES (?)").run(canonical);
+  res.json({ slug: canonical });
 });
 
 router.delete("/:slug", (req, res) => {
-  getDb().prepare("DELETE FROM favourite_users WHERE slug = ?").run(req.params.slug);
-  res.json({ deleted: req.params.slug });
+  const canonical = (req.params.slug || "").trim().toLowerCase();
+  getDb().prepare("DELETE FROM favourite_users WHERE slug = ?").run(canonical);
+  res.json({ deleted: canonical });
 });
 
 function extractErrorMessage(e) {
@@ -38,8 +40,8 @@ function extractErrorMessage(e) {
 router.get("/:slug/orders", async (req, res) => {
   const { slug } = req.params;
   try {
-    const json = await queueFetch(`https://api.warframe.market/v2/orders/user/${slug}`);
-    const orders = json.data ?? [];
+    const json = await fetchUserOrders((slug || "").toLowerCase());
+    const orders = (json && json.data) ? json.data : [];
     const db = getDb();
 
     const enriched = await Promise.all(orders.map(async (o) => {
