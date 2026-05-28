@@ -1,5 +1,6 @@
 import { queueFetch } from "./queue.js";
 import { getDb } from "./db.js";
+import { classifyItem } from "./classify.js";
 
 const BASE = "https://api.warframe.market/v2";
 
@@ -25,14 +26,26 @@ export async function syncItems() {
       thumb:     i.thumb || null,
     })));
 
-    console.log(`Synced ${items.length} items.`);
+      console.log(`Synced ${items.length} items.`);
+
+      // Eagerly populate max_rank for Arcanes and Mods so UI can show rank info
+      for (const it of items) {
+        try {
+          const grp = classifyItem(it.i18n?.en?.name ?? it.slug, it.slug);
+          if (grp === "Arcanes" || grp === "Mods") {
+            await ensureMaxRank(it.slug).catch(() => {});
+          }
+        } catch (_) {
+          // ignore per-item failures
+        }
+      }
   } catch (err) {
     console.error("Failed to sync items:", err.message);
   }
 }
 
 // Fetch max_rank for an item from v2 API and cache in DB
-async function ensureMaxRank(url_name) {
+export async function ensureMaxRank(url_name) {
   const db = getDb();
   const row = db.prepare("SELECT max_rank FROM items WHERE url_name = ?").get(url_name);
 
@@ -76,5 +89,5 @@ export async function fetchPriceSnapshot(url_name, rank = null) {
   // Lazily cache max_rank
   const maxRank = await ensureMaxRank(url_name);
 
-  return { url_name, min, avg: Math.round(avg * 100) / 100, max, volume: prices.length, maxRank };
+  return { url_name, min, avg: Math.round(avg * 100) / 100, max, volume: prices.length, maxRank, max_rank: maxRank };
 }

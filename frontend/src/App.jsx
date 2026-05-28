@@ -382,6 +382,7 @@ export default function App() {
   const [snapshot,     setSnapshot]     = useState(null);
   const [history,      setHistory]      = useState([]);
   const [loadingPrice, setLoadingPrice] = useState(false);
+  const [loadingRank,  setLoadingRank]  = useState(false);
 
   // User
   const [userInput,      setUserInput]      = useState("");
@@ -467,6 +468,10 @@ export default function App() {
   const [activeGMGroup,   setActiveGMGroup]   = useState(null);
   const [gmSearch,        setGmSearch]        = useState("");
   const [gmItems,         setGmItems]         = useState([]);
+  const [gmLimit,         setGmLimit]         = useState(50);
+  const [gmOffset,        setGmOffset]        = useState(0);
+  const [gmMore,          setGmMore]          = useState(false);
+  const [gmCategory,      setGmCategory]      = useState("all");
   const [renamingGroup,   setRenamingGroup]   = useState(null);
   const [renameVal,       setRenameVal]       = useState("");
 
@@ -484,15 +489,35 @@ export default function App() {
     loadAlecaFrame();
   }, [tab, alecaStatus]);
 
-  // GM item search
+  // GM item search with pagination and optional category
   useEffect(() => {
-    if (!gmSearch.trim()) {
-      const t = setTimeout(() => setGmItems([]), 0);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => getItems(gmSearch).then(setGmItems).catch(console.error), 300);
-    return () => clearTimeout(t);
-  }, [gmSearch]);
+    let active = true;
+    setGmOffset(0);
+    setGmItems([]);
+    setGmMore(false);
+    if (!gmSearch.trim()) return;
+    const t = setTimeout(async () => {
+      try {
+        const res = await getItems(gmSearch, { limit: gmLimit, offset: 0, category: gmCategory === 'all' ? null : gmCategory });
+        if (!active) return;
+        const items = res.items ?? res;
+        setGmItems(items);
+        setGmMore(!!res.more);
+        setGmOffset(items.length);
+      } catch (e) { console.error(e); }
+    }, 300);
+    return () => { active = false; clearTimeout(t); };
+  }, [gmSearch, gmLimit, gmCategory]);
+
+  async function loadMoreGmItems() {
+    try {
+      const res = await getItems(gmSearch, { limit: gmLimit, offset: gmOffset, category: gmCategory === 'all' ? null : gmCategory });
+      const items = res.items ?? res;
+      setGmItems(prev => [...prev, ...items]);
+      setGmMore(!!res.more);
+      setGmOffset(prev => prev + items.length);
+    } catch (e) { console.error(e); }
+  }
 
   // ── Market ────────────────────────────────────────────────────────────────
   async function handleSelect(item, rank = null) {
@@ -513,6 +538,19 @@ export default function App() {
       console.error(e);
     }
     setLoadingPrice(false);
+  }
+
+  async function handleFetchMaxRank() {
+    if (!selected) return;
+    setLoadingRank(true);
+    try {
+      const snap = await fetchPrice(selected.url_name, selectedRank);
+      setSelected(prev => prev ? { ...prev, max_rank: snap.snapshot?.max_rank ?? prev.max_rank } : prev);
+      setSnapshot({ ...snap.snapshot, rankSnapshots: snap.rankSnapshots ?? [] });
+    } catch (e) {
+      console.error(e);
+    }
+    setLoadingRank(false);
   }
 
   function jumpToItem(order) {
@@ -897,6 +935,35 @@ export default function App() {
     getScannerGroups().then(setScanGroups);
   }
 
+  async function handleAddAllListed() {
+    if (!activeGMGroup) return;
+    const toAdd = gmItems.filter(item => !activeGMGroup.items.some(i => i.url_name === item.url_name));
+    if (!toAdd.length) {
+      alert("No new items to add from the current list.");
+      return;
+    }
+    const namesPreview = toAdd.slice(0, 10).map(i => i.item_name).join(', ');
+    const confirmMsg = `Add ${toAdd.length} items to group \"${activeGMGroup.name}\"?` + (toAdd.length > 10 ? `\nPreview: ${namesPreview}, ...` : `\nPreview: ${namesPreview}`);
+    if (!window.confirm(confirmMsg)) return;
+
+    const results = { added: [], failed: [] };
+    for (const item of toAdd) {
+      try {
+        await addItemToGroup(activeGMGroup.id, item.url_name);
+        results.added.push(item.item_name);
+      } catch (e) {
+        results.failed.push(item.item_name);
+      }
+    }
+
+    const cg = await getCustomGroups();
+    setCustomGroups(cg);
+    setActiveGMGroup(cg.find(g => g.id === activeGMGroup.id));
+    getScannerGroups().then(setScanGroups);
+
+    alert(`Added ${results.added.length} items. ${results.failed.length ? `${results.failed.length} failed.` : ""}`);
+  }
+
   async function handleRemoveFromGroup(url_name) {
     if (!activeGMGroup) return;
     await removeItemFromGroup(activeGMGroup.id, url_name);
@@ -962,6 +1029,12 @@ export default function App() {
                 <h2>{selected.item_name}</h2>
                 <code>{selected.url_name}</code>
                 {selectedRank !== null && <p className="hint">Showing market snapshot for rank {selectedRank} only.</p>}
+                {selected.max_rank == null && !loadingRank && (
+                  <button className="action-btn" onClick={handleFetchMaxRank}>
+                    Fetch max rank metadata
+                  </button>
+                )}
+                {loadingRank && <p className="hint">Fetching item rank metadata…</p>}
                 {loadingPrice&&<p className="hint">Fetching live orders…</p>}
                 {snapshot&&(
                   <>
@@ -1589,6 +1662,21 @@ export default function App() {
                   style={{width:"100%",padding:"8px 12px",background:"#1c1f2b",border:"1px solid #2a2d3a",borderRadius:"6px",color:"#e0e0e0",marginBottom:8}}
                   placeholder="Search items to add..." value={gmSearch}
                   onChange={e=>setGmSearch(e.target.value)}/>
+                <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+                  <select value={gmCategory} onChange={e=>setGmCategory(e.target.value)} style={{background:"#1c1f2b",border:"1px solid #2a2d3a",color:"#e0e0e0",padding:"6px 8px",borderRadius:6}}>
+                    <option value="all">All</option>
+                    <option value="Arcanes">Arcanes</option>
+                    <option value="Primed Mods">Primed Mods</option>
+                    <option value="Primary Sets">Primary Sets</option>
+                    <option value="Melee Sets">Melee Sets</option>
+                    <option value="Secondary Sets">Secondary Sets</option>
+                    <option value="Mods">Mods</option>
+                    <option value="Relics">Relics</option>
+                  </select>
+                  <button className="refresh-btn" onClick={handleAddAllListed} disabled={!activeGMGroup || gmItems.length===0}>
+                    Add All Listed
+                  </button>
+                </div>
                 <div className="gm-item-list">
                   {gmItems.map(item=>{
                     const already = activeGMGroup.items.some(i=>i.url_name===item.url_name);
@@ -1604,6 +1692,11 @@ export default function App() {
                   })}
                   {gmSearch&&gmItems.length===0&&<p className="hint" style={{fontSize:"0.8rem"}}>No items found.</p>}
                 </div>
+                {gmMore && (
+                  <div style={{marginTop:8}}>
+                    <button className="refresh-btn" onClick={loadMoreGmItems}>Load more</button>
+                  </div>
+                )}
               </>
             )}
           </div>

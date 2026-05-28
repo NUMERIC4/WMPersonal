@@ -2,8 +2,13 @@ import axios from "axios";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3001/api";
 
-export const getItems = (search = "") =>
-  axios.get(`${API_BASE}/items`, { params: { search } }).then(r => r.data);
+export const getItems = (search = "", opts = {}) => {
+  const params = { search };
+  if (opts.limit != null) params.limit = opts.limit;
+  if (opts.offset != null) params.offset = opts.offset;
+  if (opts.category) params.category = opts.category;
+  return axios.get(`${API_BASE}/items`, { params }).then(r => r.data);
+};
 
 export const syncMarketItems = () =>
   axios.post(`${API_BASE}/items/sync`).then(r => r.data);
