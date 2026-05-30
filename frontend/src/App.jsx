@@ -325,10 +325,12 @@ function StatsPanel({ urlName }) {
 }
 
 // ── Group Selector (btn86 style) ──────────────────────────────────────────────
-function GroupSelector({ groups, selected, onSelect, groupStats = {} }) {
-  const builtin = Object.entries(groups).filter(([k]) => !k.startsWith("Custom: ") && !k.startsWith("NPC: "));
-  const npc     = Object.entries(groups).filter(([k]) =>  k.startsWith("NPC: "));
-  const custom  = Object.entries(groups).filter(([k]) =>  k.startsWith("Custom: "));
+function GroupSelector({ groups, selected, onSelect, groupStats = {}, filter = "" }) {
+  const normalizedFilter = filter.trim().toLowerCase();
+  const matchesFilter = (g) => !normalizedFilter || g.toLowerCase().includes(normalizedFilter);
+  const builtin = Object.entries(groups).filter(([k]) => matchesFilter(k) && !k.startsWith("Custom: ") && !k.startsWith("NPC: "));
+  const npc     = Object.entries(groups).filter(([k]) => matchesFilter(k) && k.startsWith("NPC: "));
+  const custom  = Object.entries(groups).filter(([k]) => matchesFilter(k) && k.startsWith("Custom: "));
 
   function Btn({ g, count }) {
     const s    = groupStats[g];
@@ -365,6 +367,11 @@ function GroupSelector({ groups, selected, onSelect, groupStats = {} }) {
             {custom.map(([g,c]) => <Btn key={g} g={g} count={c}/>)}
           </div>
         </>
+      )}
+      {builtin.length === 0 && npc.length === 0 && custom.length === 0 && (
+        <div style={{color: "#999", padding: "12px 0", fontSize: "0.95rem"}}>
+          No matching groups found.
+        </div>
       )}
     </div>
   );
@@ -423,6 +430,7 @@ export default function App() {
   // Scanner
   const [scanGroups,   setScanGroups]   = useState({});
   const [scanGroup,    setScanGroup]    = useState("Arcanes");
+  const [scanGroupFilter, setScanGroupFilter] = useState("");
   const [scanRunning,  setScanRunning]  = useState(false);
   const [scanProgress, setScanProgress] = useState(null);
   const [scanLog,      setScanLog]      = useState("");
@@ -1339,11 +1347,27 @@ export default function App() {
         <div className="scanner-layout">
           <div className="scanner-sidebar">
             <h3 className="section-label" style={{marginBottom:10}}>Groups</h3>
+            <input
+              type="text"
+              value={scanGroupFilter}
+              onChange={e => setScanGroupFilter(e.target.value)}
+              placeholder="Filter group names..."
+              style={{
+                width: "100%",
+                marginBottom: 12,
+                padding: "8px 10px",
+                borderRadius: 6,
+                border: "1px solid #2a2d3a",
+                background: "#121523",
+                color: "#eee",
+              }}
+            />
             <GroupSelector
               groups={scanGroups}
               selected={scanGroup}
               onSelect={g=>{setScanGroup(g);setViewGroup(g);}}
               groupStats={groupStats}
+              filter={scanGroupFilter}
             />
           </div>
           <div className="scanner-main">

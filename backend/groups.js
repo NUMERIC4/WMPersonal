@@ -225,6 +225,13 @@ const HOLDFASTS_CAVALERO_COSTS = Object.fromEntries([
   "cascadia_overcharge",
 ].map(itemSlug => [itemSlug, 10000]));
 
+const ORDIS_COSTS = Object.fromEntries([
+  "molt_augmented",
+  "molt_efficiency",
+  "molt_reconstruct",
+  "molt_vigor",
+].map(itemSlug => [itemSlug, 10000]));
+
 const CAVIA_BIRD3_COSTS = {
   melee_retaliation: 5000,
   melee_fortification: 5000,
@@ -375,6 +382,12 @@ const VENDOR_BASE = {
   "Vendor: The Quills / Onkko": Object.keys(QUILLS_ONKKO_COSTS),
   "Vendor: Vox Solaris / Little Duck": Object.keys(VOX_SOLARIS_COSTS),
   "Vendor: The Holdfasts / Cavalero": Object.keys(HOLDFASTS_CAVALERO_COSTS),
+  "Vendor: Relay / Ordis": slugs([
+    "Molt Augmented",
+    "Molt Efficiency",
+    "Molt Reconstruct",
+    "Molt Vigor",
+  ]),
   "Vendor: Cavia / Bird 3": Object.keys(CAVIA_BIRD3_COSTS),
   "Vendor: Duviri / Acrithis": DUVIRI_ACRITHIS_ARCANES,
   "Vendor: Arbitration Honors": ARBITRATION_HONORS,
@@ -440,6 +453,7 @@ function buildSyndicateCostMap() {
   Object.assign(costs, QUILLS_ONKKO_COSTS);
   Object.assign(costs, VOX_SOLARIS_COSTS);
   Object.assign(costs, HOLDFASTS_CAVALERO_COSTS);
+  Object.assign(costs, ORDIS_COSTS);
   Object.assign(costs, CAVIA_BIRD3_COSTS);
   return costs;
 }
