@@ -376,6 +376,12 @@ const VENDOR_BASE = {
     "Archon Continuity","Archon Flow","Archon Intensify","Archon Stretch","Archon Vitality",
   ]),
   "Vendor: Cephalon Simaris": Object.keys(SIMARIS_COSTS),
+  "Vendor: Baro / Kiteer": slugs([
+    "Molt Augmented",
+    "Molt Efficiency",
+    "Molt Reconstruct",
+    "Molt Vigor",
+  ]),
   "Vendor: Ostron / Hok": Object.keys(OSTRON_HOK_COSTS),
   "Vendor: Solaris United / Rude Zuud": Object.keys(SOLARIS_RUDE_ZUUD_COSTS),
   "Vendor: Ventkids / Roky": Object.keys(VENTKIDS_ROKY_COSTS),
@@ -489,7 +495,10 @@ export function listGroupCounts() {
     "LEFT JOIN custom_group_items cgi ON cgi.group_id = cg.id " +
     "GROUP BY cg.id HAVING cnt > 0"
   ).all();
-  for (const group of customGroups) counts[customGroupLabel(group.name)] = group.cnt;
+  for (const group of customGroups) {
+    const label = counts.hasOwnProperty(group.name) ? group.name : customGroupLabel(group.name);
+    counts[label] = group.cnt;
+  }
 
   for (const [label, groupSlugs] of Object.entries(NPC_GROUPS)) {
     const found = groupSlugs.filter(itemSlug => allSlugs.has(itemSlug)).length;
@@ -503,6 +512,14 @@ export function getItemsForGroup(group = "All Items") {
   const db = getDb();
   const items = db.prepare("SELECT item_name, url_name, max_rank FROM items").all()
     .map(item => ({ ...item, standing_cost: getStandingCost(item.url_name) }));
+
+  const customRow = db.prepare("SELECT id FROM custom_groups WHERE name = ?").get(group);
+  if (customRow) {
+    const groupSlugs = new Set(
+      db.prepare("SELECT url_name FROM custom_group_items WHERE group_id = ?").all(customRow.id).map(r => r.url_name)
+    );
+    return items.filter(item => groupSlugs.has(item.url_name));
+  }
 
   if (group === "All Items") return items;
 

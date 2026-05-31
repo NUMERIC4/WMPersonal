@@ -70,6 +70,9 @@ export const deleteCustomGroup = (id) =>
 export const renameCustomGroup = (id, name) =>
   axios.patch(`${API_BASE}/customgroups/${id}`, { name }).then(r => r.data);
 
+export const createCustomGroupFromDefault = (name, sourceGroup) =>
+  axios.post(`${API_BASE}/customgroups/from-default`, { name, sourceGroup }).then(r => r.data);
+
 export const addItemToGroup = (id, url_name) =>
   axios.post(`${API_BASE}/customgroups/${id}/items`, { url_name }).then(r => r.data);
 

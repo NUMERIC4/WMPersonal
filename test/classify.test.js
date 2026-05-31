@@ -48,6 +48,7 @@ test("mission and vendor groups exist for non-relay sources", () => {
   assert.ok(getNpcGroupSlugs("Vendor: Vox Solaris / Little Duck").includes("magus_lockdown"));
   assert.ok(getNpcGroupSlugs("Vendor: The Holdfasts / Cavalero").includes("molt_augmented"));
   assert.ok(getNpcGroupSlugs("Vendor: Relay / Ordis").includes("molt_augmented"));
+  assert.ok(getNpcGroupSlugs("Vendor: Baro / Kiteer").includes("molt_augmented"));
   assert.ok(getNpcGroupSlugs("Vendor: Cavia / Bird 3").includes("melee_influence"));
   assert.ok(getNpcGroupSlugs("Vendor: Duviri / Acrithis").includes("longbow_sharpshot"));
   assert.ok(getNpcGroupSlugs("Vendor: Arbitration Honors").includes("galvanized_chamber"));

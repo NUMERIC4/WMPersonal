@@ -7,7 +7,7 @@ import {
   getStats, getScannerGroups, cancelScan,
   getScannerItems, cancelProfit, cancelTimeAnalysis,
   syncMarketItems,
-  getCustomGroups, createCustomGroup, deleteCustomGroup,
+  getCustomGroups, createCustomGroup, createCustomGroupFromDefault, deleteCustomGroup,
   renameCustomGroup, addItemToGroup, removeItemFromGroup,
   getAlecaStatus, getAlecaSummary, getAlecaTrades, getAlecaRelics,
 } from "./api";
@@ -29,6 +29,11 @@ function platPerKStanding(value, standingCost) {
 function fmtNum(value) {
   return value === null || value === undefined ? "/" : value.toLocaleString();
 }
+
+const SPECIAL_GROUP_NOTES = {
+  "Vendor: Baro / Kiteer": "This is a rotating relay vendor. Add current Baro items manually in Group Manager, or note the next visit if no market data is available.",
+  "Event: Warframe": "This is a scheduled event group. Populate it for the current event, or record the next event arrival time when no event is active.",
+};
 
 function tradeTypeLabel(type) {
   return type === 0 ? "Sale" : type === 1 ? "Purchase" : "Trade";
@@ -943,6 +948,27 @@ export default function App() {
     getScannerGroups().then(setScanGroups);
   }
 
+  async function handleEditDefaultGroup(sourceGroup) {
+    const existing = customGroups.find(g => g.name === sourceGroup);
+    if (existing) {
+      setActiveGMGroup(existing);
+      setGmSearch("");
+      return;
+    }
+
+    try {
+      const group = await createCustomGroupFromDefault(sourceGroup, sourceGroup);
+      const [cg, sg] = await Promise.all([getCustomGroups(), getScannerGroups()]);
+      setCustomGroups(cg);
+      setScanGroups(sg);
+      setActiveGMGroup(group);
+      setGmSearch("");
+    } catch (error) {
+      console.error(error);
+      alert(error.response?.data?.error || error.message || "Unable to clone the default group.");
+    }
+  }
+
   async function handleAddAllListed() {
     if (!activeGMGroup) return;
     const toAdd = gmItems.filter(item => !activeGMGroup.items.some(i => i.url_name === item.url_name));
@@ -1383,6 +1409,9 @@ export default function App() {
                 {scanRunning&&<button className="cancel-btn" onClick={stopScan}>■ Cancel</button>}
               </div>
             </div>
+            {SPECIAL_GROUP_NOTES[scanGroup] && (
+              <div className="hint" style={{marginBottom: 12}}>{SPECIAL_GROUP_NOTES[scanGroup]}</div>
+            )}
             {scanRunning&&(
               <>
                 <div className="progress-wrap">
@@ -1628,6 +1657,20 @@ export default function App() {
       {tab==="groups"&&(
         <div className="gm-layout">
           <div className="gm-sidebar">
+            <h3 className="section-label" style={{marginBottom:10}}>Built-in Groups</h3>
+            <div style={{marginBottom:12}}>
+              {Object.entries(scanGroups).filter(([k]) => !k.startsWith("Custom: ") && k !== "All Items").sort(([a],[b]) => a.localeCompare(b)).map(([label,count]) => (
+                <div key={label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginRight:8}}>{label}</span>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <span style={{color:"#999",fontSize:"0.85rem"}}>{count}</span>
+                    <button className="refresh-btn" style={{padding:"4px 8px",fontSize:"0.8rem"}} onClick={() => handleEditDefaultGroup(label)}>
+                      {customGroups.some(g => g.name === label) ? "Open" : "Edit"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
             <h3 className="section-label" style={{marginBottom:10}}>My Groups</h3>
             <div className="gm-new-group">
               <input placeholder="New group name..." value={newGroupName}
@@ -1669,6 +1712,14 @@ export default function App() {
                     {activeGMGroup.items.length} items
                   </span>
                 </h2>
+                {SPECIAL_GROUP_NOTES[activeGMGroup.name] && (
+                  <p className="hint" style={{marginBottom: 12}}>{SPECIAL_GROUP_NOTES[activeGMGroup.name]}</p>
+                )}
+                {scanGroups[activeGMGroup.name] != null && customGroups.some(g => g.name === activeGMGroup.name) && (
+                  <p className="hint" style={{marginBottom: 12}}>
+                    This custom group overrides the built-in "{activeGMGroup.name}" group for Scanner and Profit views.
+                  </p>
+                )}
                 <div className="gm-members" style={{marginBottom:16}}>
                   <h3 className="section-label" style={{marginBottom:6}}>Members</h3>
                   {activeGMGroup.items.length===0&&<p className="hint" style={{fontSize:"0.8rem"}}>No items yet - search below to add.</p>}

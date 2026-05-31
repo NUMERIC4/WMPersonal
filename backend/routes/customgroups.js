@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getDb } from "../db.js";
+import { getItemsForGroup } from "../groups.js";
 
 const router = Router();
 
@@ -425,6 +426,23 @@ router.post("/", (req, res) => {
   try {
     const r = db.prepare("INSERT INTO custom_groups (name) VALUES (?)").run(name.trim());
     res.json({ id: r.lastInsertRowid, name: name.trim(), items: [] });
+  } catch (e) { res.status(409).json({ error: "Group already exists" }); }
+});
+
+router.post("/from-default", (req, res) => {
+  const { name, sourceGroup } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "name required" });
+  const db = getDb();
+  try {
+    const r = db.prepare("INSERT INTO custom_groups (name) VALUES (?)").run(name.trim());
+    const items = getItemsForGroup(sourceGroup);
+    const insert = db.prepare("INSERT OR IGNORE INTO custom_group_items (group_id, url_name) VALUES (?, ?)");
+    const insertAll = db.transaction((rows) => {
+      for (const item of rows) insert.run(r.lastInsertRowid, item.url_name);
+    });
+    insertAll(items);
+    const resultItems = items.map(item => ({ url_name: item.url_name, item_name: item.item_name }));
+    res.json({ id: r.lastInsertRowid, name: name.trim(), items: resultItems });
   } catch (e) { res.status(409).json({ error: "Group already exists" }); }
 });
 
