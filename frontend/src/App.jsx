@@ -751,6 +751,7 @@ export default function App() {
           [scanGroup]: [...(prev[scanGroup]??[]), {
             item: msg.item,
             url_name: snap.url_name ?? item.url_name,
+            standingSource: msg.standing_source ?? null,
             standingCost,
             minPlatPerKStanding,
             avgPlatPerKStanding,
@@ -949,7 +950,8 @@ export default function App() {
   }
 
   async function handleEditDefaultGroup(sourceGroup) {
-    const existing = customGroups.find(g => g.name === sourceGroup);
+    const cloneName = `${sourceGroup} (edited)`;
+    const existing = customGroups.find(g => g.name === cloneName);
     if (existing) {
       setActiveGMGroup(existing);
       setGmSearch("");
@@ -957,7 +959,7 @@ export default function App() {
     }
 
     try {
-      const group = await createCustomGroupFromDefault(sourceGroup, sourceGroup);
+      const group = await createCustomGroupFromDefault(cloneName, sourceGroup);
       const [cg, sg] = await Promise.all([getCustomGroups(), getScannerGroups()]);
       setCustomGroups(cg);
       setScanGroups(sg);
@@ -1444,6 +1446,7 @@ export default function App() {
                         {renderScanSortTh("Avg", "avg")}
                         {renderScanSortTh("Max", "max")}
                         {renderScanSortTh("Vol", "volume")}
+                        {renderScanSortTh("Source", "standingSource")}
                         {renderScanSortTh("Standing", "standingCost")}
                         {renderScanSortTh("Min / 1k", "minPlatPerKStanding")}
                         {renderScanSortTh("Avg / 1k", "avgPlatPerKStanding")}
@@ -1457,6 +1460,7 @@ export default function App() {
                           <td>{r.avg != null ? `${r.avg} pt` : "/"}</td>
                           <td>{r.max != null ? `${r.max} pt` : "/"}</td>
                           <td>{r.volume != null ? r.volume : "/"}</td>
+                          <td>{r.standingSource || "/"}</td>
                           <td>{r.standingCost ? r.standingCost.toLocaleString() : "/"}</td>
                           <td>{r.minPlatPerKStanding != null ? `${r.minPlatPerKStanding} pt` : "/"}</td>
                           <td>{r.avgPlatPerKStanding != null ? `${r.avgPlatPerKStanding} pt` : "/"}</td>
@@ -1659,17 +1663,21 @@ export default function App() {
           <div className="gm-sidebar">
             <h3 className="section-label" style={{marginBottom:10}}>Built-in Groups</h3>
             <div style={{marginBottom:12}}>
-              {Object.entries(scanGroups).filter(([k]) => !k.startsWith("Custom: ") && k !== "All Items").sort(([a],[b]) => a.localeCompare(b)).map(([label,count]) => (
-                <div key={label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginRight:8}}>{label}</span>
-                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                    <span style={{color:"#999",fontSize:"0.85rem"}}>{count}</span>
-                    <button className="refresh-btn" style={{padding:"4px 8px",fontSize:"0.8rem"}} onClick={() => handleEditDefaultGroup(label)}>
-                      {customGroups.some(g => g.name === label) ? "Open" : "Edit"}
-                    </button>
+              {Object.entries(scanGroups).filter(([k]) => !k.startsWith("Custom: ") && k !== "All Items").sort(([a],[b]) => a.localeCompare(b)).map(([label,count]) => {
+                const hasEditableCopy = customGroups.some(g => g.name === label);
+                const isOpen = activeGMGroup?.name === label;
+                return (
+                  <div key={label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginRight:8}}>{label}</span>
+                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <span style={{color:"#999",fontSize:"0.85rem"}}>{count}</span>
+                      <button className="refresh-btn" style={{padding:"4px 8px",fontSize:"0.8rem"}} onClick={() => handleEditDefaultGroup(label)}>
+                        {isOpen ? "Lock" : hasEditableCopy ? "Open" : "Edit"}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <h3 className="section-label" style={{marginBottom:10}}>My Groups</h3>
             <div className="gm-new-group">

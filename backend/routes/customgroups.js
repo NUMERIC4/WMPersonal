@@ -433,17 +433,24 @@ router.post("/from-default", (req, res) => {
   const { name, sourceGroup } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: "name required" });
   const db = getDb();
+  const groupName = name.trim();
+  const items = getItemsForGroup(sourceGroup, { includeCustom: false });
+  const insert = db.prepare("INSERT OR IGNORE INTO custom_group_items (group_id, url_name) VALUES (?, ?)");
+  const hydrateItems = (groupId) => db.prepare(
+    "SELECT cgi.url_name, i.item_name FROM custom_group_items cgi " +
+    "LEFT JOIN items i ON i.url_name = cgi.url_name " +
+    "WHERE cgi.group_id = ? ORDER BY i.item_name"
+  ).all(groupId);
+
   try {
-    const r = db.prepare("INSERT INTO custom_groups (name) VALUES (?)").run(name.trim());
-    const items = getItemsForGroup(sourceGroup);
-    const insert = db.prepare("INSERT OR IGNORE INTO custom_group_items (group_id, url_name) VALUES (?, ?)");
+    const existing = db.prepare("SELECT id FROM custom_groups WHERE name = ?").get(groupName);
+    const groupId = existing?.id ?? db.prepare("INSERT INTO custom_groups (name) VALUES (?)").run(groupName).lastInsertRowid;
     const insertAll = db.transaction((rows) => {
-      for (const item of rows) insert.run(r.lastInsertRowid, item.url_name);
+      for (const item of rows) insert.run(groupId, item.url_name);
     });
     insertAll(items);
-    const resultItems = items.map(item => ({ url_name: item.url_name, item_name: item.item_name }));
-    res.json({ id: r.lastInsertRowid, name: name.trim(), items: resultItems });
-  } catch (e) { res.status(409).json({ error: "Group already exists" }); }
+    res.json({ id: groupId, name: groupName, items: hydrateItems(groupId) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.delete("/:id", (req, res) => {

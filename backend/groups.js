@@ -474,8 +474,46 @@ export function getNpcGroupSlugs(label) {
   return [...(NPC_GROUPS[label] ?? [])];
 }
 
+function buildStandingSourceMap() {
+  const sources = {};
+
+  for (const [label, groupSlugs] of Object.entries(SYNDICATE_BASE)) {
+    for (const itemSlug of groupSlugs) {
+      sources[itemSlug] = label;
+    }
+  }
+
+  for (const [augmentNames, labels] of WARFRAME_AUGMENTS) {
+    const sourceLabel = [...new Set(labels)].join(" / ");
+    for (const itemSlug of slugs(augmentNames)) {
+      sources[itemSlug] = sourceLabel;
+    }
+  }
+
+  for (const itemSlug of Object.keys(SIMARIS_COSTS)) sources[itemSlug] = "Vendor: Cephalon Simaris";
+  for (const itemSlug of Object.keys(HEX_STANDING_COSTS)) sources[itemSlug] = "Vendor: The Hex";
+  for (const itemSlug of Object.keys(OSTRON_HOK_COSTS)) sources[itemSlug] = "Vendor: Ostron / Hok";
+  for (const itemSlug of Object.keys(SOLARIS_RUDE_ZUUD_COSTS)) sources[itemSlug] = "Vendor: Solaris United / Rude Zuud";
+  for (const itemSlug of Object.keys(VENTKIDS_ROKY_COSTS)) sources[itemSlug] = "Vendor: Ventkids / Roky";
+  for (const itemSlug of Object.keys(QUILLS_ONKKO_COSTS)) sources[itemSlug] = "Vendor: The Quills / Onkko";
+  for (const itemSlug of Object.keys(VOX_SOLARIS_COSTS)) sources[itemSlug] = "Vendor: Vox Solaris / Little Duck";
+  for (const itemSlug of Object.keys(HOLDFASTS_CAVALERO_COSTS)) sources[itemSlug] = "Vendor: The Holdfasts / Cavalero";
+  for (const itemSlug of Object.keys(ORDIS_COSTS)) sources[itemSlug] = "Vendor: Relay / Ordis";
+  for (const itemSlug of Object.keys(CAVIA_BIRD3_COSTS)) sources[itemSlug] = "Vendor: Cavia / Bird 3";
+  for (const itemSlug of Object.keys(DUVIRI_ACRITHIS_ARCANES)) sources[itemSlug] = "Vendor: Duviri / Acrithis";
+  for (const itemSlug of Object.keys(ARBITRATION_HONORS)) sources[itemSlug] = "Vendor: Arbitration Honors";
+
+  return sources;
+}
+
+const STANDING_SOURCES = buildStandingSourceMap();
+
 export function getStandingCost(url_name) {
   return SYNDICATE_COSTS[url_name] ?? null;
+}
+
+export function getStandingSource(url_name) {
+  return STANDING_SOURCES[url_name] ?? null;
 }
 
 export function listGroupCounts() {
@@ -508,22 +546,24 @@ export function listGroupCounts() {
   return counts;
 }
 
-export function getItemsForGroup(group = "All Items") {
+export function getItemsForGroup(group = "All Items", { includeCustom = true } = {}) {
   const db = getDb();
   const items = db.prepare("SELECT item_name, url_name, max_rank FROM items").all()
     .map(item => ({ ...item, standing_cost: getStandingCost(item.url_name) }));
 
-  const customRow = db.prepare("SELECT id FROM custom_groups WHERE name = ?").get(group);
-  if (customRow) {
-    const groupSlugs = new Set(
-      db.prepare("SELECT url_name FROM custom_group_items WHERE group_id = ?").all(customRow.id).map(r => r.url_name)
-    );
-    return items.filter(item => groupSlugs.has(item.url_name));
+  if (includeCustom) {
+    const customRow = db.prepare("SELECT id FROM custom_groups WHERE name = ?").get(group);
+    if (customRow) {
+      const groupSlugs = new Set(
+        db.prepare("SELECT url_name FROM custom_group_items WHERE group_id = ?").all(customRow.id).map(r => r.url_name)
+      );
+      return items.filter(item => groupSlugs.has(item.url_name));
+    }
   }
 
   if (group === "All Items") return items;
 
-  if (group.startsWith("Custom: ")) {
+  if (includeCustom && group.startsWith("Custom: ")) {
     const name = group.slice("Custom: ".length);
     const row = db.prepare("SELECT id FROM custom_groups WHERE name = ?").get(name);
     if (!row) return [];

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getDb } from "../db.js";
 import { fetchPriceSnapshot } from "../sync.js";
-import { getItemsForGroup, listGroupCounts } from "../groups.js";
+import { getItemsForGroup, listGroupCounts, getStandingSource } from "../groups.js";
 
 const router = Router();
 let cancelFlag = false;
@@ -70,6 +70,7 @@ router.get("/run", async (req, res) => {
         total,
         item: item.item_name,
         standing_cost: item.standing_cost,
+        standing_source: getStandingSource(item.url_name),
         snap,
       });
     } catch (error) {
