@@ -44,17 +44,36 @@ function processQueue() {
   running = true;
 
   const request = queue.shift();
-  const { url, resolve, reject, attempts = 0 } = request;
+  const { url, resolve, reject, attempts = 0, timeoutMs = 15000 } = request;
+  const controller = new AbortController();
+  let timer = null;
 
-  fetch(url, {
+  const timeoutErrorFactory = () => {
+    const timeoutError = new Error(`Request timed out after ${timeoutMs}ms: ${url}`);
+    timeoutError.name = "TimeoutError";
+    return timeoutError;
+  };
+
+  const fetchPromise = fetch(url, {
     headers: {
       "Accept":       "application/json",
       "Language":     "en",
       "Platform":     "pc",
       "Crossplay":    "true",
     },
-  })
+    signal: controller.signal,
+  });
+
+  const timeoutPromise = new Promise((_, rejectTimeout) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      rejectTimeout(timeoutErrorFactory());
+    }, timeoutMs);
+  });
+
+  Promise.race([fetchPromise, timeoutPromise])
     .then(async (res) => {
+      if (timer) clearTimeout(timer);
       const text = await res.text();
       if (!res.ok) {
         let body = null;
@@ -68,9 +87,15 @@ function processQueue() {
       resolve(JSON.parse(text));
     })
     .catch((error) => {
+      if (timer) clearTimeout(timer);
+      if (error.name === "AbortError" || error.name === "TimeoutError") {
+        reject(error);
+        scheduleNext();
+        return;
+      }
       if (shouldRetry(error, attempts)) {
         const delay = retryDelay(error, attempts);
-        queue.push({ url, resolve, reject, attempts: attempts + 1 });
+        queue.push({ url, resolve, reject, attempts: attempts + 1, timeoutMs });
         setTimeout(() => processQueue(), delay);
         return;
       }
@@ -81,9 +106,10 @@ function processQueue() {
     });
 }
 
-export function queueFetch(url) {
+export function queueFetch(url, options = {}) {
+  const { timeoutMs = 15000 } = options;
   return new Promise((resolve, reject) => {
-    queue.push({ url, resolve, reject });
+    queue.push({ url, resolve, reject, timeoutMs });
     processQueue();
   });
 }

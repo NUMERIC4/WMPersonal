@@ -43,6 +43,12 @@ export async function refreshFavourites() {
         }).filter(Boolean)
       )];
 
+      db.prepare("DELETE FROM favourite_user_marketplace_items WHERE slug = ?").run(canonical);
+      const insertItem = db.prepare("INSERT INTO favourite_user_marketplace_items (slug, url_name) VALUES (?, ?)");
+      for (const itemSlug of slugs) {
+        insertItem.run(canonical, itemSlug);
+      }
+
       let fetched = 0;
       for (const itemSlug of slugs) {
         try {
@@ -54,7 +60,7 @@ export async function refreshFavourites() {
       }
 
       console.log(`  ${canonical}: ${orders.length} orders, ${fetched} snapshots saved.`);
-      results.push({ slug: canonical, orders: orders.length, snapshots: fetched });
+      results.push({ slug: canonical, orders: orders.length, snapshots: fetched, marketplace_items: slugs.length });
     } catch (e) {
       const message = extractErrorMessage(e);
       console.error(`  Failed to refresh ${canonical}: ${message}`);

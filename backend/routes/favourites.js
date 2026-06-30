@@ -16,12 +16,16 @@ router.post("/", (req, res) => {
   if (!slug) return res.status(400).json({ error: "slug required" });
   const canonical = slug.trim().toLowerCase();
   getDb().prepare("INSERT OR IGNORE INTO favourite_users (slug) VALUES (?)").run(canonical);
+  refreshFavourites().catch(err => console.error("Failed to refresh favourites after add:", err));
   res.json({ slug: canonical });
 });
 
 router.delete("/:slug", (req, res) => {
   const canonical = (req.params.slug || "").trim().toLowerCase();
-  getDb().prepare("DELETE FROM favourite_users WHERE slug = ?").run(canonical);
+  const db = getDb();
+  db.prepare("DELETE FROM favourite_user_marketplace_items WHERE slug = ?").run(canonical);
+  db.prepare("DELETE FROM favourite_users WHERE slug = ?").run(canonical);
+  refreshFavourites().catch(err => console.error("Failed to refresh favourites after remove:", err));
   res.json({ deleted: canonical });
 });
 

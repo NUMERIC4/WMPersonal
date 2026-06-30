@@ -413,6 +413,9 @@ export default function App() {
   const [loadingView,   setLoadingView]   = useState(false);
   const [viewError,     setViewError]     = useState("");
   const [viewSection,   setViewSection]   = useState(null);
+  const [viewCards,     setViewCards]     = useState([]);
+  const [activeViewSlug, setActiveViewSlug] = useState(null);
+  const [viewAbortRef, setViewAbortRef] = useState(null);
 
   // Favourites
   const [favs,        setFavs]        = useState([]);
@@ -597,28 +600,79 @@ export default function App() {
     setLoadingUser(false);
   }
 
+  function buildViewCard(orders, slug) {
+    const slugs = [...new Set(orders.map(o => o.item_slug).filter(Boolean))];
+    const res = {};
+    const liveRes = {};
+    return Promise.all([
+      ...slugs.map(s => getPriceHistory(s).then(h => { res[s] = h; }).catch(() => { res[s] = []; })),
+      ...slugs.map(s => fetchPrice(s).then(r => { liveRes[s] = (r && r.snapshot) ? r.snapshot : r; }).catch(() => { liveRes[s] = null; }))
+    ]).then(() => orders.map(o => ({ ...o, history: res[o.item_slug] ?? [], live: liveRes[o.item_slug] ?? null })))
+      .catch((err) => { throw err; });
+  }
+
   async function handleViewUserSearch() {
-    if (!viewInput.trim()) return;
-    setViewError(""); setViewOrders([]); setViewSlug("");
-    setLoadingView(true); setViewSection(null);
+    const slug = viewInput.trim();
+    if (!slug) return;
+
+    if (viewAbortRef) viewAbortRef.abort();
+    const controller = new AbortController();
+    setViewAbortRef(controller);
+    setViewError("");
+    setViewSlug(slug);
+    setLoadingView(true);
+    setViewSection(null);
+    setActiveViewSlug(slug);
+
+    const existing = viewCards.find(card => card.slug.toLowerCase() === slug.toLowerCase());
+    if (existing) {
+      setViewOrders(existing.orders);
+      setLoadingView(false);
+      setViewAbortRef(null);
+      return;
+    }
+
     try {
-      const orders = await getUserOrders(viewInput.trim());
-      // fetch histories and live snapshots for the items in this view
-      const slugs = [...new Set(orders.map(o => o.item_slug).filter(Boolean))];
-      const res = {};
-      await Promise.all(slugs.map(s => getPriceHistory(s).then(h => { res[s] = h; }).catch(() => { res[s] = []; })));
-      const liveRes = {};
-      await Promise.all(slugs.map(s => fetchPrice(s).then(r => { liveRes[s] = (r && r.snapshot) ? r.snapshot : r; }).catch(() => { liveRes[s] = null; })));
-      const enriched = orders.map(o => ({ ...o, history: res[o.item_slug] ?? [], live: liveRes[o.item_slug] ?? null }));
+      const orders = await getUserOrders(slug, { signal: controller.signal });
+      const enriched = await buildViewCard(orders, slug);
+      const nextCard = { slug, orders: enriched, fetchedAt: Date.now() };
+      setViewCards(prev => {
+        const filtered = prev.filter(card => card.slug.toLowerCase() !== slug.toLowerCase());
+        return [...filtered, nextCard];
+      });
       setViewOrders(enriched);
-      setViewSlug(viewInput.trim());
       if (!orders.length) {
         setViewError("No orders found.");
       }
-    } catch {
-      setViewError("User not found or API error.");
+    } catch (err) {
+      if (err?.name === "CanceledError" || err?.message?.includes("canceled") || err?.code === "ERR_CANCELED") {
+        setViewError("Fetch cancelled.");
+      } else {
+        setViewError("User not found or API error.");
+      }
     }
     setLoadingView(false);
+    setViewAbortRef(null);
+  }
+
+  function cancelViewFetch() {
+    if (viewAbortRef) {
+      viewAbortRef.abort();
+      setViewAbortRef(null);
+    }
+    setLoadingView(false);
+    setViewError("Fetch cancelled.");
+  }
+
+  function selectViewCard(slug) {
+    const card = viewCards.find(c => c.slug.toLowerCase() === slug.toLowerCase());
+    if (card) {
+      setViewOrders(card.orders);
+      setViewSlug(card.slug);
+      setActiveViewSlug(card.slug);
+      setViewError("");
+      setViewSection(null);
+    }
   }
 
   function generateTradeChat() {
@@ -1200,7 +1254,18 @@ export default function App() {
             <input placeholder="Enter username to view..." value={viewInput}
               onChange={e=>setViewInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleViewUserSearch()}/>
             <button onClick={handleViewUserSearch}>View</button>
+            {loadingView&&<button onClick={cancelViewFetch} className="fav-remove" title="Cancel fetch" style={{marginLeft:8}}>×</button>}
           </div>
+          {viewCards.length > 0 && (
+            <div className="fav-list" style={{marginBottom:16}}>
+              {viewCards.map(card => (
+                <div key={card.slug} className={`fav-item ${activeViewSlug === card.slug ? "active" : ""}`} onClick={() => selectViewCard(card.slug)}>
+                  <span className="fav-name">{card.slug}</span>
+                  <button className="fav-remove" onClick={(e) => { e.stopPropagation(); setViewCards(prev => prev.filter(c => c.slug !== card.slug)); if (activeViewSlug === card.slug) { setViewOrders([]); setViewSlug(""); setViewError(""); } }} title="Remove viewed user">×</button>
+                </div>
+              ))}
+            </div>
+          )}
           {loadingView&&<p className="hint">Fetching orders…</p>}
           {viewError&&<p className="hint">{viewError}</p>}
           {viewOrders.length>0&&(
@@ -1213,6 +1278,16 @@ export default function App() {
               <div className="section-toggles">
                 <button className={`toggle-btn sell ${viewSection==="sell"?"active":""}`} onClick={()=>setViewSection(p=>p==="sell"?null:"sell")}>Selling ({viewOrders.filter(o=>o.order_type==="sell").length})</button>
                 <button className={`toggle-btn buy  ${viewSection==="buy" ?"active":""}`} onClick={()=>setViewSection(p=>p==="buy" ?null:"buy" )}>Buying ({viewOrders.filter(o=>o.order_type==="buy").length})</button>
+              </div>
+              <div className="hint" style={{marginTop:8, marginBottom:12}}>
+                {(() => {
+                  const sellMatches = viewOrders.filter(o => o.order_type === "sell" && baseFavOrders.some(b => b.order_type === "buy" && (b.item_slug === o.item_slug || b.item_name === o.item_name))).length;
+                  const buyMatches = viewOrders.filter(o => o.order_type === "buy" && baseFavOrders.some(b => b.order_type === "sell" && (b.item_slug === o.item_slug || b.item_name === o.item_name))).length;
+                  if (sellMatches || buyMatches) {
+                    return `Trade hints: ${sellMatches} of their sells match your base user buys, and ${buyMatches} of their buys match your base user sells.`;
+                  }
+                  return "No direct trade matches against the current base user yet.";
+                })()}
               </div>
               {viewSection==="sell"&&<OrderTable orders={viewOrders.filter(o=>o.order_type==="sell")} onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && baseFavOrders.length > 0 ? baseFavOrders : []}/>}
               {viewSection==="buy" &&<OrderTable orders={viewOrders.filter(o=>o.order_type==="buy")}  onItemClick={jumpToItem} showLive={false} compareOrders={baseFav && baseFavOrders.length > 0 ? baseFavOrders : []}/>}

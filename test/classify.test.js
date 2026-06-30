@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyItem } from "../backend/classify.js";
-import { getNpcGroupSlugs, getStandingCost } from "../backend/groups.js";
+import { initDb, getDb } from "../backend/db.js";
+import { FAVOURITE_USER_GROUP_LABEL, getNpcGroupSlugs, getStandingCost, getItemsForGroup, listGroupCounts } from "../backend/groups.js";
 
 test("classifies common market group types", () => {
   assert.equal(classifyItem("Arcane Energize", "arcane_energize"), "Arcanes");
@@ -76,4 +77,24 @@ test("syndicate standing costs are available for scanner efficiency", () => {
   assert.equal(getStandingCost("longbow_sharpshot"), null);
   assert.equal(getStandingCost("galvanized_chamber"), null);
   assert.equal(getStandingCost("necramech_vitality"), null);
+});
+
+test("scanner exposes favourite-user marketplace items as a dedicated group", () => {
+  initDb();
+  const db = getDb();
+
+  db.prepare("DELETE FROM favourite_user_marketplace_items").run();
+  db.prepare("DELETE FROM favourite_users").run();
+  db.prepare("DELETE FROM items").run();
+  db.prepare("INSERT INTO favourite_users (slug) VALUES (?)").run("TestUser");
+  db.prepare("INSERT OR IGNORE INTO items (id, url_name, item_name) VALUES (?, ?, ?)").run("1", "arcane_energize", "Arcane Energize");
+  db.prepare("INSERT OR IGNORE INTO items (id, url_name, item_name) VALUES (?, ?, ?)").run("2", "primed_continuity", "Primed Continuity");
+  db.prepare("INSERT INTO favourite_user_marketplace_items (slug, url_name) VALUES (?, ?)").run("testuser", "arcane_energize");
+  db.prepare("INSERT INTO favourite_user_marketplace_items (slug, url_name) VALUES (?, ?)").run("testuser", "primed_continuity");
+
+  const counts = listGroupCounts();
+  assert.equal(counts[FAVOURITE_USER_GROUP_LABEL], 2);
+
+  const items = getItemsForGroup(FAVOURITE_USER_GROUP_LABEL);
+  assert.deepEqual(items.map(i => i.url_name).sort(), ["arcane_energize", "primed_continuity"]);
 });

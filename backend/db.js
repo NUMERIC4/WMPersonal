@@ -70,6 +70,15 @@ export function initDb() {
   );
 
   db.exec(
+    "CREATE TABLE IF NOT EXISTS favourite_user_marketplace_items (" +
+    "  slug       TEXT NOT NULL," +
+    "  url_name   TEXT NOT NULL," +
+    "  added_at   TEXT DEFAULT (datetime('now'))," +
+    "  PRIMARY KEY (slug, url_name)" +
+    ");"
+  );
+
+  db.exec(
     "CREATE TABLE IF NOT EXISTS custom_groups (" +
     "  id   INTEGER PRIMARY KEY AUTOINCREMENT," +
     "  name TEXT NOT NULL UNIQUE" +

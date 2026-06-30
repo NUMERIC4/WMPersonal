@@ -19,8 +19,8 @@ export const fetchPrice = (url_name, rank = null) =>
 export const getPriceHistory = (url_name) =>
   axios.get(`${API_BASE}/prices/${url_name}`).then(r => r.data);
 
-export const getUserOrders = (slug) =>
-  axios.get(`${API_BASE}/users/${slug}/orders`).then(r => r.data);
+export const getUserOrders = (slug, opts = {}) =>
+  axios.get(`${API_BASE}/users/${slug}/orders`, { signal: opts.signal }).then(r => r.data);
 
 export const getFavourites = () =>
   axios.get(`${API_BASE}/favourites`).then(r => r.data);

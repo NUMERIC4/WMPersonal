@@ -466,6 +466,8 @@ function buildSyndicateCostMap() {
 
 const SYNDICATE_COSTS = buildSyndicateCostMap();
 
+export const FAVOURITE_USER_GROUP_LABEL = "Fav User Marketplace";
+
 export function customGroupLabel(name) {
   return `Custom: ${name}`;
 }
@@ -516,6 +518,14 @@ export function getStandingSource(url_name) {
   return STANDING_SOURCES[url_name] ?? null;
 }
 
+function getFavouriteUserMarketplaceSlugs() {
+  const db = getDb();
+  return db.prepare("SELECT DISTINCT url_name FROM favourite_user_marketplace_items")
+    .all()
+    .map(row => row.url_name)
+    .filter(Boolean);
+}
+
 export function listGroupCounts() {
   const db = getDb();
   const items = db.prepare("SELECT item_name, url_name FROM items").all();
@@ -543,6 +553,9 @@ export function listGroupCounts() {
     if (found > 0) counts[label] = found;
   }
 
+  const favouriteMarketplaceSlugs = getFavouriteUserMarketplaceSlugs().filter(itemSlug => allSlugs.has(itemSlug));
+  if (favouriteMarketplaceSlugs.length > 0) counts[FAVOURITE_USER_GROUP_LABEL] = favouriteMarketplaceSlugs.length;
+
   return counts;
 }
 
@@ -562,6 +575,11 @@ export function getItemsForGroup(group = "All Items", { includeCustom = true } =
   }
 
   if (group === "All Items") return items;
+
+  if (group === FAVOURITE_USER_GROUP_LABEL) {
+    const groupSlugs = new Set(getFavouriteUserMarketplaceSlugs());
+    return items.filter(item => groupSlugs.has(item.url_name));
+  }
 
   if (includeCustom && group.startsWith("Custom: ")) {
     const name = group.slice("Custom: ".length);
