@@ -1,9 +1,13 @@
 import Database from "better-sqlite3";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 let db;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = path.resolve(__dirname, "..", "data.db");
 
 export function initDb() {
-  db = new Database("data.db");
+  db = new Database(DB_PATH);
 
   db.exec(
     "CREATE TABLE IF NOT EXISTS items (" +
