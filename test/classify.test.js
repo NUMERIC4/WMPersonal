@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { classifyItem } from "../backend/classify.js";
 import { initDb, getDb } from "../backend/db.js";
 import { FAVOURITE_USER_GROUP_LABEL, getNpcGroupSlugs, getStandingCost, getItemsForGroup, listGroupCounts } from "../backend/groups.js";
@@ -80,21 +83,25 @@ test("syndicate standing costs are available for scanner efficiency", () => {
 });
 
 test("scanner exposes favourite-user marketplace items as a dedicated group", () => {
-  initDb();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wmpersonal-test-"));
+  const tempDb = path.join(tempDir, "data.db");
+  initDb({ path: tempDb });
   const db = getDb();
 
-  db.prepare("DELETE FROM favourite_user_marketplace_items").run();
-  db.prepare("DELETE FROM favourite_users").run();
-  db.prepare("DELETE FROM items").run();
-  db.prepare("INSERT INTO favourite_users (slug) VALUES (?)").run("TestUser");
-  db.prepare("INSERT OR IGNORE INTO items (id, url_name, item_name) VALUES (?, ?, ?)").run("1", "arcane_energize", "Arcane Energize");
-  db.prepare("INSERT OR IGNORE INTO items (id, url_name, item_name) VALUES (?, ?, ?)").run("2", "primed_continuity", "Primed Continuity");
-  db.prepare("INSERT INTO favourite_user_marketplace_items (slug, url_name) VALUES (?, ?)").run("testuser", "arcane_energize");
-  db.prepare("INSERT INTO favourite_user_marketplace_items (slug, url_name) VALUES (?, ?)").run("testuser", "primed_continuity");
+  try {
+    db.prepare("INSERT INTO favourite_users (slug) VALUES (?)").run("TestUser");
+    db.prepare("INSERT OR IGNORE INTO items (id, url_name, item_name) VALUES (?, ?, ?)").run("1", "arcane_energize", "Arcane Energize");
+    db.prepare("INSERT OR IGNORE INTO items (id, url_name, item_name) VALUES (?, ?, ?)").run("2", "primed_continuity", "Primed Continuity");
+    db.prepare("INSERT INTO favourite_user_marketplace_items (slug, url_name) VALUES (?, ?)").run("testuser", "arcane_energize");
+    db.prepare("INSERT INTO favourite_user_marketplace_items (slug, url_name) VALUES (?, ?)").run("testuser", "primed_continuity");
 
-  const counts = listGroupCounts();
-  assert.equal(counts[FAVOURITE_USER_GROUP_LABEL], 2);
+    const counts = listGroupCounts();
+    assert.equal(counts[FAVOURITE_USER_GROUP_LABEL], 2);
 
-  const items = getItemsForGroup(FAVOURITE_USER_GROUP_LABEL);
-  assert.deepEqual(items.map(i => i.url_name).sort(), ["arcane_energize", "primed_continuity"]);
+    const items = getItemsForGroup(FAVOURITE_USER_GROUP_LABEL);
+    assert.deepEqual(items.map(i => i.url_name).sort(), ["arcane_energize", "primed_continuity"]);
+  } finally {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });

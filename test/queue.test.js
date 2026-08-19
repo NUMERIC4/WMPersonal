@@ -1,7 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { queueFetch } from "../backend/queue.js";
+import { queueFetch, selectNextQueuedRequest } from "../backend/queue.js";
+
+test("queue selector moves high priority ahead of waiting low priority", () => {
+  const now = Date.now();
+  const queue = [
+    { priority: "low", enqueuedAt: now },
+    { priority: "normal", enqueuedAt: now },
+    { priority: "high", enqueuedAt: now },
+  ];
+
+  assert.equal(selectNextQueuedRequest(queue, now), 2);
+});
+
+test("queue selector prevents permanent low-priority starvation", () => {
+  const now = Date.now();
+  const queue = [
+    { priority: "high", enqueuedAt: now },
+    { priority: "low", enqueuedAt: now - 31000 },
+  ];
+
+  assert.equal(selectNextQueuedRequest(queue, now), 1);
+});
 
 test("queueFetch rejects a request that hangs instead of waiting forever", async () => {
   const server = http.createServer(() => {});

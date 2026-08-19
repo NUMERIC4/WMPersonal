@@ -5,9 +5,30 @@ const MAX_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 15000;
 const RETRY_AFTER_BUFFER_MS = 1000;
+const PRIORITY_LEVELS = { high: 3, normal: 2, low: 1 };
+const LOW_STARVATION_MS = 30000;
 
 const queue = [];
 let running = false;
+
+export function selectNextQueuedRequest(requests, now = Date.now()) {
+  if (!requests.length) return null;
+  const starvingLow = requests.findIndex(request =>
+    (request.priority ?? "normal") === "low" && now - (request.enqueuedAt ?? now) >= LOW_STARVATION_MS
+  );
+  if (starvingLow !== -1) return starvingLow;
+
+  let bestIndex = 0;
+  let bestPriority = PRIORITY_LEVELS[requests[0].priority ?? "normal"] ?? PRIORITY_LEVELS.normal;
+  for (let i = 1; i < requests.length; i++) {
+    const priority = PRIORITY_LEVELS[requests[i].priority ?? "normal"] ?? PRIORITY_LEVELS.normal;
+    if (priority > bestPriority) {
+      bestPriority = priority;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
 
 function parseRetryAfter(header) {
   if (!header) return null;
@@ -43,7 +64,8 @@ function processQueue() {
   if (running || queue.length === 0) return;
   running = true;
 
-  const request = queue.shift();
+  const requestIndex = selectNextQueuedRequest(queue);
+  const [request] = queue.splice(requestIndex, 1);
   const { url, resolve, reject, attempts = 0, timeoutMs = 15000 } = request;
   const controller = new AbortController();
   let timer = null;
@@ -95,7 +117,7 @@ function processQueue() {
       }
       if (shouldRetry(error, attempts)) {
         const delay = retryDelay(error, attempts);
-        queue.push({ url, resolve, reject, attempts: attempts + 1, timeoutMs });
+        queue.push({ ...request, attempts: attempts + 1 });
         setTimeout(() => processQueue(), delay);
         return;
       }
@@ -107,9 +129,9 @@ function processQueue() {
 }
 
 export function queueFetch(url, options = {}) {
-  const { timeoutMs = 15000 } = options;
+  const { timeoutMs = 15000, priority = "normal" } = options;
   return new Promise((resolve, reject) => {
-    queue.push({ url, resolve, reject, timeoutMs });
+    queue.push({ url, resolve, reject, timeoutMs, priority, enqueuedAt: Date.now() });
     processQueue();
   });
 }

@@ -19,6 +19,24 @@ export const fetchPrice = (url_name, rank = null) =>
 export const getPriceHistory = (url_name) =>
   axios.get(`${API_BASE}/prices/${url_name}`).then(r => r.data);
 
+export const getMarketOrderStatus = (url_name) =>
+  axios.get(`${API_BASE}/market-orders/${url_name}/status`).then(r => r.data);
+
+export const getStoredMarketSummary = (url_name) =>
+  axios.get(`${API_BASE}/market-orders/${url_name}/stored-summary`).then(r => r.data);
+
+export const getMarketAnalysis = (url_name) =>
+  axios.get(`${API_BASE}/market-orders/${url_name}/analysis`).then(r => r.data);
+
+export const refreshMarketOrders = (url_name) =>
+  axios.post(`${API_BASE}/market-orders/${url_name}/refresh`).then(r => r.data);
+
+export const recordMarketDemand = (url_name, source = "market_view") =>
+  axios.post(`${API_BASE}/market-orders/${url_name}/demand`, { source }).then(r => r.data);
+
+export const getMarketSchedulerStatus = () =>
+  axios.get(`${API_BASE}/market-orders/scheduler/status`).then(r => r.data);
+
 export const getUserOrders = (slug, opts = {}) =>
   axios.get(`${API_BASE}/users/${slug}/orders`, { signal: opts.signal }).then(r => r.data);
 
@@ -93,3 +111,15 @@ export const getAlecaTrades = () =>
 
 export const getAlecaRelics = () =>
   axios.get(`${API_BASE}/alecaframe/relics`).then(r => r.data);
+
+export const getRelics = (opts = {}) =>
+  axios.get(`${API_BASE}/relics`, { params: opts }).then(r => r.data);
+
+export const getRelicValuation = (id) =>
+  axios.get(`${API_BASE}/relics/${id}`).then(r => r.data);
+
+export const syncRelics = () =>
+  axios.post(`${API_BASE}/relics/sync`).then(r => r.data);
+
+export const recordRelicDemand = (id) =>
+  axios.post(`${API_BASE}/relics/${id}/demand`).then(r => r.data);

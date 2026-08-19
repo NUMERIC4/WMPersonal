@@ -9,7 +9,9 @@ import {
   syncMarketItems,
   getCustomGroups, createCustomGroup, createCustomGroupFromDefault, deleteCustomGroup,
   renameCustomGroup, addItemToGroup, removeItemFromGroup,
+  getMarketOrderStatus, getMarketAnalysis, refreshMarketOrders, recordMarketDemand, getMarketSchedulerStatus,
   getAlecaStatus, getAlecaSummary, getAlecaTrades, getAlecaRelics,
+  getRelics, getRelicValuation, syncRelics, recordRelicDemand,
 } from "./api";
 import "./App.css";
 
@@ -28,6 +30,36 @@ function platPerKStanding(value, standingCost) {
 
 function fmtNum(value) {
   return value === null || value === undefined ? "/" : value.toLocaleString();
+}
+
+function formatAge(seconds) {
+  if (seconds === null || seconds === undefined) return null;
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function configLabel(key) {
+  if (!key) return "Default";
+  const parts = [];
+  if (key.rank !== null && key.rank !== undefined) parts.push(`Rank ${key.rank}`);
+  if (key.subtype) parts.push(key.subtype);
+  if (key.charges !== null && key.charges !== undefined) parts.push(`${key.charges} charges`);
+  if (key.amberStars !== null && key.amberStars !== undefined) parts.push(`${key.amberStars} amber`);
+  if (key.cyanStars !== null && key.cyanStars !== undefined) parts.push(`${key.cyanStars} cyan`);
+  return parts.length ? parts.join(" / ") : "Default";
+}
+
+function plat(value, fallback = "—") {
+  return value === null || value === undefined ? fallback : `${value}p`;
+}
+
+function rangePlat(range) {
+  if (!range || range.low === null || range.low === undefined || range.high === null || range.high === undefined) return "—";
+  return range.low === range.high ? `${range.low}p` : `${range.low}–${range.high}p`;
 }
 
 const SPECIAL_GROUP_NOTES = {
@@ -88,6 +120,26 @@ function InfoPopup({ title, children, onClose }) {
           <button className="popup-close" onClick={onClose}>x</button>
         </div>
         <div className="popup-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmPopup({ title, children, confirmLabel = "Yes", cancelLabel = "Cancel", busy = false, onConfirm, onCancel }) {
+  return (
+    <div className="popup-overlay" onClick={busy ? undefined : onCancel}>
+      <div className="popup-box confirm-popup" onClick={e => e.stopPropagation()}>
+        <div className="popup-header">
+          <h3>{title}</h3>
+          <button className="popup-close" onClick={onCancel} disabled={busy}>x</button>
+        </div>
+        <div className="popup-body">{children}</div>
+        <div className="popup-actions">
+          <button className="refresh-btn" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
+          <button className="confirm-delete-btn" onClick={onConfirm} disabled={busy}>
+            {busy ? "Deleting..." : confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -395,6 +447,12 @@ export default function App() {
   const [history,      setHistory]      = useState([]);
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [loadingRank,  setLoadingRank]  = useState(false);
+  const [orderStatus,  setOrderStatus]  = useState(null);
+  const [refreshingOrders, setRefreshingOrders] = useState(false);
+  const [orderRefreshError, setOrderRefreshError] = useState("");
+  const [schedulerStatus, setSchedulerStatus] = useState(null);
+  const [marketAnalysis, setMarketAnalysis] = useState(null);
+  const [selectedMarketKey, setSelectedMarketKey] = useState(null);
 
   // User
   const [userInput,      setUserInput]      = useState("");
@@ -428,6 +486,8 @@ export default function App() {
   const [lastRefresh, setLastRefresh] = useState(null);
   const [baseFav,     setBaseFav]     = useState(null);
   const [baseFavOrders, setBaseFavOrders] = useState([]);
+  const [favDeleteSlug, setFavDeleteSlug] = useState(null);
+  const [deletingFav, setDeletingFav] = useState(false);
 
   // Trade Chat Builder
   const [tradeSelected,    setTradeSelected]    = useState(new Set());
@@ -459,6 +519,17 @@ export default function App() {
   const [profitDir,      setProfitDir]      = useState("desc");
   const [showProfitInfo, setShowProfitInfo] = useState(false);
   const profitEsRef = useRef(null);
+
+  // Relics
+  const [relics, setRelics] = useState([]);
+  const [relicEras, setRelicEras] = useState([]);
+  const [relicSearch, setRelicSearch] = useState("");
+  const [relicEra, setRelicEra] = useState("");
+  const [selectedRelic, setSelectedRelic] = useState(null);
+  const [relicValuation, setRelicValuation] = useState(null);
+  const [relicLoading, setRelicLoading] = useState(false);
+  const [relicSyncing, setRelicSyncing] = useState(false);
+  const [relicSyncResult, setRelicSyncResult] = useState(null);
 
   // Time Analysis
   const [taGroup,      setTaGroup]      = useState("Arcanes");
@@ -497,13 +568,56 @@ export default function App() {
   }, [search]);
 
   useEffect(() => { getFavourites().then(setFavs).catch(console.error); }, []);
+  useEffect(() => { getMarketSchedulerStatus().then(setSchedulerStatus).catch(() => setSchedulerStatus(null)); }, []);
   useEffect(() => { getScannerGroups().then(setScanGroups).catch(console.error); }, []);
   useEffect(() => { getCustomGroups().then(setCustomGroups).catch(console.error); }, []);
+
+  useEffect(() => {
+    if (tab !== "relics") return;
+    loadRelics();
+  }, [tab, relicSearch, relicEra]);
 
   useEffect(() => {
     if (tab !== "alecaframe" || alecaStatus) return;
     loadAlecaFrame();
   }, [tab, alecaStatus]);
+
+  async function loadRelics() {
+    try {
+      const data = await getRelics({ search: relicSearch, era: relicEra || undefined });
+      setRelics(data.relics ?? []);
+      setRelicEras(data.eras ?? []);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function handleSyncRelics() {
+    setRelicSyncing(true);
+    try {
+      const result = await syncRelics();
+      setRelicSyncResult(result);
+      await loadRelics();
+    } catch (error) {
+      console.error(error);
+      setRelicSyncResult({ error: error.message });
+    }
+    setRelicSyncing(false);
+  }
+
+  async function handleSelectRelic(relic) {
+    setSelectedRelic(relic);
+    setRelicLoading(true);
+    try {
+      const data = await getRelicValuation(relic.id);
+      setRelicValuation(data);
+      recordRelicDemand(relic.id).catch(() => {});
+    } catch (error) {
+      console.error(error);
+      setRelicValuation(null);
+    }
+    setRelicLoading(false);
+  }
 
   // GM item search with pagination and optional category
   useEffect(() => {
@@ -542,18 +656,55 @@ export default function App() {
     setSelectedRank(rank);
     setSnapshot(null);
     setHistory([]);
+    setOrderStatus(null);
+    setMarketAnalysis(null);
+    setSelectedMarketKey(null);
+    setOrderRefreshError("");
     setLoadingPrice(true);
     try {
-      const [snap, hist] = await Promise.all([
+      recordMarketDemand(item.url_name, "market_view").catch(() => {});
+      const [snap, hist, status, analysis] = await Promise.all([
         fetchPrice(item.url_name, rank),
         getPriceHistory(item.url_name),
+        getMarketOrderStatus(item.url_name).catch(() => null),
+        getMarketAnalysis(item.url_name).catch(() => null),
       ]);
       setSnapshot({ ...snap.snapshot, rankSnapshots: snap.rankSnapshots ?? [] });
       setHistory(hist);
+      setOrderStatus(status);
+      setMarketAnalysis(analysis);
+      setSelectedMarketKey(analysis?.configurations?.[0]?.marketKeyId ?? null);
     } catch (e) {
       console.error(e);
     }
     setLoadingPrice(false);
+  }
+
+  async function handleRefreshStoredOrders() {
+    if (!selected || refreshingOrders) return;
+    setRefreshingOrders(true);
+    setOrderRefreshError("");
+    try {
+      const refreshed = await refreshMarketOrders(selected.url_name);
+      const analysis = await getMarketAnalysis(selected.url_name).catch(() => refreshed);
+      setOrderStatus({
+        url_name: selected.url_name,
+        synced: true,
+        lastSuccessfulSyncAt: refreshed.freshness?.lastSuccessfulSyncAt ?? refreshed.sync?.syncedAt ?? null,
+        ageSeconds: refreshed.freshness?.ageSeconds ?? 0,
+        freshness: refreshed.freshness?.state ?? "fresh",
+        freshnessDetails: refreshed.freshness ?? null,
+        storedActiveOrderCount: refreshed.storedActiveOrderCount ?? refreshed.sync?.fetched ?? 0,
+        configurationCount: refreshed.configurationCount ?? 0,
+        lastFetchedOrderCount: refreshed.sync?.fetched ?? 0,
+      });
+      setMarketAnalysis(analysis);
+      setSelectedMarketKey(analysis?.configurations?.[0]?.marketKeyId ?? refreshed?.configurations?.[0]?.marketKeyId ?? null);
+    } catch (e) {
+      console.error(e);
+      setOrderRefreshError("Refresh failed. Showing previous stored data.");
+    }
+    setRefreshingOrders(false);
   }
 
   async function handleFetchMaxRank() {
@@ -720,10 +871,22 @@ export default function App() {
     getFavourites().then(setFavs);
   }
 
-  async function handleRemoveFav(slug) {
-    await removeFavourite(slug);
-    if (activeFav===slug) { setActiveFav(null); setFavOrders([]); }
-    getFavourites().then(setFavs);
+  function requestRemoveFav(slug) {
+    setFavDeleteSlug(slug);
+  }
+
+  async function confirmRemoveFav() {
+    if (!favDeleteSlug) return;
+    setDeletingFav(true);
+    try {
+      await removeFavourite(favDeleteSlug);
+      if (activeFav===favDeleteSlug) { setActiveFav(null); setFavOrders([]); }
+      if (baseFav===favDeleteSlug) { setBaseFav(null); setBaseFavOrders([]); }
+      setFavDeleteSlug(null);
+      getFavourites().then(setFavs);
+    } finally {
+      setDeletingFav(false);
+    }
   }
 
   async function handleSetBaseFav(username) {
@@ -797,18 +960,21 @@ export default function App() {
           [scanGroup]: { done:msg.done, total:msg.total, isLast:false }
         }));
         const standingCost = msg.standing_cost ?? null;
-        const snap = msg.snap ?? { url_name: item.url_name, min: null, avg: null, max: null, volume: null };
+        const snap = msg.snap ?? { url_name: msg.url_name ?? null, min: null, avg: null, max: null, volume: null };
         const minPlatPerKStanding = platPerKStanding(snap.min, standingCost);
         const avgPlatPerKStanding = platPerKStanding(snap.avg, standingCost);
         setGroupResults(prev => ({
           ...prev,
           [scanGroup]: [...(prev[scanGroup]??[]), {
             item: msg.item,
-            url_name: snap.url_name ?? item.url_name,
+            url_name: snap.url_name ?? msg.url_name,
             standingSource: msg.standing_source ?? null,
             standingCost,
             minPlatPerKStanding,
             avgPlatPerKStanding,
+            fair: msg.marketValuation?.fair ?? null,
+            buyNow: msg.marketValuation?.buyNow ?? null,
+            confidence: msg.marketValuation?.confidence ?? null,
             ...snap,
           }]
         }));
@@ -1081,10 +1247,17 @@ export default function App() {
     if (av > bv) return scanDir === "asc" ? 1 : -1;
     return 0;
   }) : [];
+  const selectedConfig = marketAnalysis?.configurations?.find(c => c.marketKeyId === selectedMarketKey) ?? marketAnalysis?.configurations?.[0] ?? null;
+  const selectedValuation = selectedConfig?.valuation ?? null;
 
   function renderScanSortTh(label, k) {
     const active = scanSort === k;
     return <th className={`sortable ${active?"sorted":""}`} onClick={()=>toggleScanSort(k)}>{label}{active?(scanDir==="asc"?" ▲":" ▼"):""}</th>;
+  }
+
+  function openWarframeMarketItem(urlName) {
+    if (!urlName) return;
+    window.open(`https://warframe.market/items/${encodeURIComponent(urlName)}?type=sell`, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -1092,8 +1265,11 @@ export default function App() {
       <header>
         <h1>WMPersonal</h1>
         <p>Warframe Market Monitor</p>
+        <div className={`scheduler-pill ${schedulerStatus?.running ? "on" : "off"}`}>
+          Auto market refresh: {schedulerStatus?.running ? "ON" : "OFF"}
+        </div>
         <div className="tabs">
-          {[["market","Market"],["user","User Orders"],["view","View User"],["favs",`Favs${favs.length?` (${favs.length})`:""}`],["scanner","Scanner"],["profit","Profit"],["timeanalysis","Time Analysis"],["alecaframe","Alecaframe"],["groups","Group Manager"]].map(([t,l])=>(
+          {[["market","Market"],["user","User Orders"],["view","View User"],["favs",`Favs${favs.length?` (${favs.length})`:""}`],["scanner","Scanner"],["profit","Profit"],["relics","Relics"],["timeanalysis","Time Analysis"],["alecaframe","Alecaframe"],["groups","Group Manager"]].map(([t,l])=>(
             <button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{l}</button>
           ))}
         </div>
@@ -1134,6 +1310,135 @@ export default function App() {
                       <div className="stat"><span>Max</span><strong>{snapshot.max} pt</strong></div>
                       <div className="stat"><span>Online sellers</span><strong>{snapshot.volume}</strong></div>
                     </div>
+                    <div className={`market-freshness ${orderStatus?.freshness || "never_synced"}`}>
+                      <div>
+                        <span className="market-freshness-title">Stored order book</span>
+                        {orderStatus?.synced ? (
+                          <span>
+                            Updated {formatAge(orderStatus.ageSeconds)}
+                            {orderStatus.freshness === "stale" ? " - STALE" : ""}
+                            {" - "}
+                            {fmtNum(orderStatus.storedActiveOrderCount)} orders
+                            {" - "}
+                            {fmtNum(orderStatus.configurationCount)} configs
+                          </span>
+                        ) : (
+                          <span>Not synced yet</span>
+                        )}
+                        {orderRefreshError && <span className="market-refresh-error">{orderRefreshError}</span>}
+                      </div>
+                      <button className="refresh-btn" onClick={handleRefreshStoredOrders} disabled={refreshingOrders}>
+                        {refreshingOrders ? "Refreshing..." : "Refresh"}
+                      </button>
+                    </div>
+                    {marketAnalysis?.configurations?.length > 0 && selectedConfig && (
+                      <div className="market-analysis-panel">
+                        <div className="market-analysis-head">
+                          <div>
+                            <h3 className="section-label">Stored Order Analysis</h3>
+                            <p className="market-analysis-sub">Configuration: {configLabel(selectedConfig.marketKey)}</p>
+                          </div>
+                          <div className="config-tabs">
+                            {marketAnalysis.configurations.map(config => (
+                              <button
+                                key={config.marketKeyId}
+                                className={config.marketKeyId === selectedConfig.marketKeyId ? "active" : ""}
+                                onClick={() => setSelectedMarketKey(config.marketKeyId)}
+                              >
+                                {configLabel(config.marketKey)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {selectedValuation && (
+                          <div className="current-market-card">
+                            <h3>CURRENT MARKET</h3>
+                            <div className="current-market-grid">
+                              <div className="current-market-primary">
+                                <span>Buy now</span>
+                                <strong>{plat(selectedValuation.executableAsk)}</strong>
+                              </div>
+                              <div className="current-market-primary">
+                                <span>Fair market</span>
+                                <strong>{selectedValuation.competitiveEstimate != null ? `~${selectedValuation.competitiveEstimate}p` : "—"}</strong>
+                                <small>Competitive range: {rangePlat(selectedValuation.competitiveRange)}</small>
+                              </div>
+                              <div>
+                                <span>Highest buyer</span>
+                                <strong>{plat(selectedValuation.highestActiveBid)}</strong>
+                                <small>Spread: {plat(selectedValuation.spread)}</small>
+                              </div>
+                              <div>
+                                <span>Recent sales</span>
+                                <strong>{plat(selectedValuation.historical?.median)}</strong>
+                                <small>Volume: {selectedValuation.historical?.volume ?? 0} / {selectedValuation.historical?.period ?? "48h"}</small>
+                              </div>
+                              <div>
+                                <span>Confidence</span>
+                                <strong>{selectedValuation.confidence?.level ?? "—"}</strong>
+                              </div>
+                            </div>
+                            <details className="price-explain">
+                              <summary>Why this price?</summary>
+                              <p>
+                                Fair market is estimated from the cheapest group of currently active sellers rather than averaging every listing.
+                              </p>
+                              <ul>
+                                <li>{selectedValuation.competitiveSet?.length ?? 0} competitive sellers: {rangePlat(selectedValuation.competitiveRange)}</li>
+                                <li>Median competitive listing: {plat(selectedValuation.competitiveEstimate)}</li>
+                                {selectedValuation.suspiciousLow?.suspicious ? (
+                                  <li>Cheapest listing {plat(selectedValuation.suspiciousLow.excludedPrice)} appears isolated, so it stays as Buy now but is not used for Fair market.</li>
+                                ) : (
+                                  <li>No isolated low-price listing detected.</li>
+                                )}
+                                {(selectedValuation.confidence?.reasons ?? []).slice(0, 5).map(reason => <li key={reason}>{reason}</li>)}
+                              </ul>
+                            </details>
+                          </div>
+                        )}
+                        <div className="market-metrics-grid">
+                          <div className="metric"><span>Legacy snapshot</span><strong>{selectedConfig.legacySnapshot?.min_price ?? snapshot?.min ?? "/"} pt</strong></div>
+                          <div className="metric"><span>Executable ask</span><strong>{selectedConfig.executableAsk ?? selectedConfig.lowestActiveSell ?? "/"} pt</strong></div>
+                          <div className="metric"><span>Lowest in-game sell</span><strong>{selectedConfig.lowestIngameSell ?? "/"} pt</strong></div>
+                          <div className="metric"><span>Competitive estimate</span><strong>{selectedConfig.competitiveEstimate ?? selectedConfig.best5SellMedian ?? "/"} pt</strong></div>
+                          <div className="metric"><span>Seller median</span><strong>{selectedConfig.sellerMedian ?? selectedConfig.medianActiveSell ?? "/"} pt</strong></div>
+                          <div className="metric"><span>Trimmed estimate</span><strong>{selectedConfig.trimmedActiveSellMedian ?? "/"} pt</strong></div>
+                          <div className="metric"><span>Highest active bid</span><strong>{selectedConfig.highestActiveBid ?? selectedConfig.highestActiveBuy ?? "/"} pt</strong></div>
+                          <div className="metric"><span>Spread</span><strong>{selectedConfig.spread ?? "/"} pt</strong></div>
+                          <div className="metric"><span>Confidence</span><strong>{selectedConfig.confidence?.level ?? selectedConfig.confidence?.label ?? "/"}</strong></div>
+                        </div>
+                        <p className="market-analysis-sub">
+                          Recent sales: median {selectedConfig.historical?.median ?? "/"} pt,
+                          avg {selectedConfig.historical?.average ?? "/"} pt,
+                          volume {selectedConfig.historical?.volume ?? 0} ({selectedConfig.historical?.period ?? "48h"}).
+                          Trimmed estimate removes IQR outliers before taking the active sell median.
+                        </p>
+                        <div className="market-order-books">
+                          <div>
+                            <h4>SELL</h4>
+                            <table>
+                              <thead><tr><th>Price</th><th>Qty</th><th>Status</th><th>Updated</th></tr></thead>
+                              <tbody>{(selectedConfig.orders?.sells ?? []).slice(0, 15).map(order => (
+                                <tr key={order.id} className={order.status === "offline" ? "dimmed" : ""}>
+                                  <td>{order.price}</td><td>{order.quantity ?? "/"}</td><td>{order.status}</td><td>{order.updatedAt ? new Date(order.updatedAt).toLocaleDateString() : "/"}</td>
+                                </tr>
+                              ))}</tbody>
+                            </table>
+                          </div>
+                          <div>
+                            <h4>BUY</h4>
+                            <table>
+                              <thead><tr><th>Price</th><th>Qty</th><th>Status</th><th>Updated</th></tr></thead>
+                              <tbody>{(selectedConfig.orders?.buys ?? []).slice(0, 15).map(order => (
+                                <tr key={order.id} className={order.status === "offline" ? "dimmed" : ""}>
+                                  <td>{order.price}</td><td>{order.quantity ?? "/"}</td><td>{order.status}</td><td>{order.updatedAt ? new Date(order.updatedAt).toLocaleDateString() : "/"}</td>
+                                </tr>
+                              ))}</tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     {snapshot.rankSnapshots?.length > 0 && (
                       <div style={{marginTop:16}}>
                         <h3 className="section-label">Rank-specific snapshots</h3>
@@ -1321,7 +1626,7 @@ export default function App() {
                   <span className="fav-name">{fav.slug}</span>
                   <button
                     className="fav-remove"
-                    onClick={(e) => { e.stopPropagation(); handleRemoveFav(fav.slug); }}
+                    onClick={(e) => { e.stopPropagation(); requestRemoveFav(fav.slug); }}
                     title="Remove favourite"
                   >
                     ×
@@ -1519,12 +1824,16 @@ export default function App() {
                         {renderScanSortTh("Item", "item")}
                         {renderScanSortTh("Min", "min")}
                         {renderScanSortTh("Avg", "avg")}
+                        {renderScanSortTh("Fair", "fair")}
+                        {renderScanSortTh("Buy Now", "buyNow")}
+                        {renderScanSortTh("Conf", "confidence")}
                         {renderScanSortTh("Max", "max")}
                         {renderScanSortTh("Vol", "volume")}
                         {renderScanSortTh("Source", "standingSource")}
                         {renderScanSortTh("Standing", "standingCost")}
                         {renderScanSortTh("Min / 1k", "minPlatPerKStanding")}
                         {renderScanSortTh("Avg / 1k", "avgPlatPerKStanding")}
+                        <th>WM</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1533,12 +1842,20 @@ export default function App() {
                           <td><span className="item-link" onClick={()=>{setTab("market");setSearch(r.item);setSelected({id:r.url_name,url_name:r.url_name,item_name:r.item});}}>{r.item}</span></td>
                           <td>{r.min != null ? `${r.min} pt` : "/"}</td>
                           <td>{r.avg != null ? `${r.avg} pt` : "/"}</td>
+                          <td>{r.fair != null ? `${r.fair} pt` : "—"}</td>
+                          <td>{r.buyNow != null ? `${r.buyNow} pt` : "—"}</td>
+                          <td>{r.confidence ?? "—"}</td>
                           <td>{r.max != null ? `${r.max} pt` : "/"}</td>
                           <td>{r.volume != null ? r.volume : "/"}</td>
                           <td>{r.standingSource || "/"}</td>
                           <td>{r.standingCost ? r.standingCost.toLocaleString() : "/"}</td>
                           <td>{r.minPlatPerKStanding != null ? `${r.minPlatPerKStanding} pt` : "/"}</td>
                           <td>{r.avgPlatPerKStanding != null ? `${r.avgPlatPerKStanding} pt` : "/"}</td>
+                          <td>
+                            <button className="wm-link-btn" onClick={()=>openWarframeMarketItem(r.url_name)} title="Open Warframe.market sell orders">
+                              Open
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1578,9 +1895,10 @@ export default function App() {
                   <tr>
                     {renderProfitSortTh("Item", "item_name")}
                     {renderProfitSortTh("Rank", "rank")}
-                    {renderProfitSortTh("Min Sell", "minSell")}
-                    {renderProfitSortTh("Max Buy", "maxBuy")}
-                    {renderProfitSortTh("Margin", "margin")}
+                    {renderProfitSortTh("Buy Now", "acquisitionValue")}
+                    {renderProfitSortTh("Best Bid", "liquidationValue")}
+                    {renderProfitSortTh("Expected Sale", "expectedResaleValue")}
+                    {renderProfitSortTh("Spread", "margin")}
                     {renderProfitSortTh("Standing", "standingCost")}
                     {renderProfitSortTh("Sell / 1k", "minSellPerKStanding")}
                     {renderProfitSortTh("Avg / 1k", "avgMedianPerKStanding")}
@@ -1600,8 +1918,9 @@ export default function App() {
                       <tr key={i} className={`row-${mc}`}>
                         <td><span className="item-link" onClick={()=>{setTab("market");setSearch(p.item_name);setSelected({id:p.url_name,url_name:p.url_name,item_name:p.item_name});}}>{p.item_name}</span></td>
                         <td>{rankLabel(p.rank,p.maxRank)??"—"}</td>
-                        <td>{p.minSell??"/"}pt</td>
-                        <td>{p.maxBuy??"/"}pt</td>
+                        <td title={p.valuationSources?.acquisition?.source ?? p.valuationSources?.acquisition?.reason ?? ""}>{p.acquisitionValue??p.minSell??"/"}pt</td>
+                        <td title={p.valuationSources?.liquidation?.source ?? p.valuationSources?.liquidation?.reason ?? ""}>{p.liquidationValue??p.maxBuy??"/"}pt</td>
+                        <td title={p.valuationSources?.resale?.source ?? p.valuationSources?.resale?.reason ?? ""}>{p.expectedResaleValue??"/"}pt</td>
                         <td><span className={`badge badge-${mc}`}>{p.margin!=null?`${p.margin>0?"+":""}${p.margin}pt`:"/"}</span></td>
                         <td>{p.standingCost?p.standingCost.toLocaleString():"/"}</td>
                         <td>{p.minSellPerKStanding!=null?`${p.minSellPerKStanding}pt`:"/"}</td>
@@ -1623,7 +1942,9 @@ export default function App() {
           {showProfitInfo&&(
             <InfoPopup title="How Profit Analyzer Works" onClose={()=>setShowProfitInfo(false)}>
               <p><strong>What it scans:</strong> Fetches live orders and 90-day statistics for every item in the selected group.</p>
-              <p style={{marginTop:8}}><strong>Margin</strong> = Min online sell price − Max online buy price. Positive margin means a buyer exists below the cheapest seller — a tradeable gap.</p>
+              <p style={{marginTop:8}}><strong>Buy Now</strong> = acquisition price from the current executable ask when available.</p>
+              <p style={{marginTop:8}}><strong>Expected Sale</strong> = fair market resale estimate from the current competitive seller cluster.</p>
+              <p style={{marginTop:8}}><strong>Spread</strong> = Buy Now − Best Bid. It is a market gap, not guaranteed profit.</p>
               <p style={{marginTop:8}}><strong>Score</strong> = Margin × Avg daily volume. High score = good margin AND sells frequently. This is the most useful column to sort by.</p>
               <p style={{marginTop:8}}><strong>Off. Min</strong> = Cheapest offline seller. Often lower than online — worth watching as a buy target.</p>
               <p style={{marginTop:8}}><strong>Avg/Day</strong> = Average trades per day over 90 days. Low number = slow market, hard to flip.</p>
@@ -1632,6 +1953,114 @@ export default function App() {
               <p style={{marginTop:8}}><strong>Limit:</strong> Analyzes up to 50 items per run to stay within rate limits.</p>
             </InfoPopup>
           )}
+        </div>
+      )}
+
+      {/* ── RELICS ── */}
+      {tab==="relics"&&(
+        <div className="relic-page">
+          <aside className="relic-sidebar">
+            <div className="scan-header">
+              <h2 className="user-title">Relics</h2>
+              <button className="refresh-btn" onClick={handleSyncRelics} disabled={relicSyncing}>
+                {relicSyncing ? "Syncing..." : "Sync Relics"}
+              </button>
+            </div>
+            {relicSyncResult&&(
+              <p className="hint-inline">
+                {relicSyncResult.error ? relicSyncResult.error : `${relicSyncResult.relics} relics, ${relicSyncResult.matched}/${relicSyncResult.rewards} rewards matched`}
+              </p>
+            )}
+            <input
+              className="search"
+              placeholder="Search relic..."
+              value={relicSearch}
+              onChange={e=>setRelicSearch(e.target.value)}
+            />
+            <div className="era-tabs">
+              <button className={!relicEra ? "active" : ""} onClick={()=>setRelicEra("")}>All</button>
+              {relicEras.map(era => (
+                <button key={era.era} className={relicEra===era.era ? "active" : ""} onClick={()=>setRelicEra(era.era)}>
+                  {era.era} ({era.count})
+                </button>
+              ))}
+            </div>
+            <div className="relic-list">
+              {relics.map(relic => (
+                <button key={relic.id} className={selectedRelic?.id===relic.id ? "active" : ""} onClick={()=>handleSelectRelic(relic)}>
+                  <span>{relic.name}</span>
+                  <small>{relic.probability_model}{relic.is_supported ? "" : " / unsupported"}</small>
+                </button>
+              ))}
+            </div>
+          </aside>
+          <main className="relic-detail">
+            {!selectedRelic&&<p className="hint">Select a relic to calculate opening EV.</p>}
+            {relicLoading&&<p className="hint">Calculating relic value...</p>}
+            {relicValuation&&!relicLoading&&(
+              <>
+                <div className="relic-title-row">
+                  <div>
+                    <h2>{relicValuation.relic.name.toUpperCase()}</h2>
+                    <p className="market-analysis-sub">
+                      Source model: {relicValuation.relic.probability_model}
+                      {relicValuation.relic.probability_model_reason ? ` - ${relicValuation.relic.probability_model_reason}` : ""}
+                    </p>
+                  </div>
+                  <div className="metric">
+                    <span>Confidence</span>
+                    <strong>{relicValuation.confidence.level}</strong>
+                  </div>
+                </div>
+                <div className="relic-ev-grid">
+                  {["Intact","Exceptional","Flawless","Radiant"].map(refinement => {
+                    const ev = relicValuation.expectedValues[refinement]?.expectedValue;
+                    const trace = relicValuation.traceEfficiency[refinement];
+                    const diff = trace?.gain ?? 0;
+                    return (
+                      <div key={refinement} className={`metric ${relicValuation.best.highestEV?.refinement===refinement ? "best" : ""}`}>
+                        <span>{refinement}</span>
+                        <strong>{ev ?? "—"}p</strong>
+                        {refinement !== "Intact" && <small>{diff >= 0 ? "+" : ""}{diff}p / {trace.traceCost} traces ({trace.platinumPerTrace}p/trace)</small>}
+                        {relicValuation.best.highestEV?.refinement===refinement && <small>Highest EV</small>}
+                        {relicValuation.best.bestTraceEfficiency?.refinement===refinement && <small>Best trace efficiency</small>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="market-analysis-sub">
+                  Price coverage: {relicValuation.priceCoverage.priced}/{relicValuation.priceCoverage.tradable} tradable rewards.
+                  {" "}Sources: {Object.entries(relicValuation.priceCoverage.sources).map(([k,v])=>`${k} ${v}`).join(", ")}.
+                </p>
+                <table className="relic-reward-table">
+                  <thead>
+                    <tr>
+                      <th>Reward</th><th>Rarity</th><th>Value</th><th>Source</th>
+                      {["Intact","Exceptional","Flawless","Radiant"].map(r=><th key={r}>{r}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {relicValuation.rewards.map(reward => (
+                      <tr key={reward.rewardName}>
+                        <td>{reward.rewardName}{!reward.isTradable && <small> non-tradable</small>}</td>
+                        <td>{reward.rarity}</td>
+                        <td>{reward.value?.value ?? "—"}{reward.value?.value != null ? "p" : ""}</td>
+                        <td>{reward.value?.source ?? reward.value?.reason ?? reward.matchStatus}</td>
+                        {["Intact","Exceptional","Flawless","Radiant"].map(refinement => {
+                          const c = relicValuation.expectedValues[refinement]?.rewardContributions?.find(row => row.rewardName === reward.rewardName);
+                          return <td key={refinement}><span>{reward.chances[refinement] ?? "—"}%</span><small>{c?.contribution ?? 0}p EV</small></td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <details className="price-explain">
+                  <summary>Relic confidence details</summary>
+                  <ul>{relicValuation.confidence.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>
+                </details>
+              </>
+            )}
+          </main>
         </div>
       )}
 
@@ -1968,6 +2397,18 @@ export default function App() {
             </InfoPopup>
           )}
         </div>
+      )}
+      {favDeleteSlug&&(
+        <ConfirmPopup
+          title="Delete favourite user?"
+          confirmLabel="Yes"
+          cancelLabel="Cancel"
+          busy={deletingFav}
+          onConfirm={confirmRemoveFav}
+          onCancel={()=>setFavDeleteSlug(null)}
+        >
+          <p>Wanna delete <strong>{favDeleteSlug}</strong> user from fav space?</p>
+        </ConfirmPopup>
       )}
     </div>
   );

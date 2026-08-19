@@ -1,156 +1,112 @@
 # WMPersonal
 
-A comprehensive personal Warframe Market monitoring dashboard with bounty tracking, price analysis, and trading tools — full stack, runs entirely on your own computer.
+Personal Warframe market analysis dashboard. It runs locally with a React/Vite frontend, an Express backend, and SQLite storage.
 
-## Features
+## Major Modules
 
-- **Market Monitor** — search any item, fetch live online seller prices, view snapshot history and 48h/90d statistics charts
-- **User Orders** — look up any warframe.market user's buy/sell listings, cross-referenced with your local DB history
-- **Favourites** — track specific traders, auto-refresh every 5 minutes, compare their prices against live market
-- **Bounty Tracker** — monitor Warframe bounty locations with live reset timers, reward prices from market data, and advanced filtering/sorting per location
-- **Scanner** — bulk-fetch price snapshots for entire item groups (Arcanes, Mods, Primary Sets, etc.) with live progress
-- **Profit Analyzer** — scan a group for margin, volume, sell speed, and a composite profit score
-- **Time Analysis** — analyze price trends and trading patterns over time
-- **Alecaframe** — personal trade history, relic inventory, and account stats
-- **Group Manager** — manage custom item groups for scanning and analysis
+- **Market**: item lookup, legacy `/top` snapshots, stored full-order analysis, current market valuation, recent sales, and confidence.
+- **Scanner**: bulk legacy snapshot scanner for item groups, with stored-only Fair / Buy Now / Confidence columns when full-order data already exists.
+- **Profit**: group scan using semantic market values for acquisition, resale, and liquidation context.
+- **Relics**: Void Relic reward tables and expected platinum value per refinement.
+- **Time Analysis**: 48h trading volume and median-price timing views.
+- **User Orders / Favourites**: user order lookup and local comparison tools.
+- **Alecaframe**: optional local account/trade/relic inventory integration.
+- **Group Manager**: custom scan groups and built-in NPC/vendor group helpers.
 
-## Tech Stack
+## Market Valuation
 
-| Layer | Technology |
-|---|---|
-| Frontend | React + Vite, Recharts for data visualization |
-| Backend | Node.js + Express, SQLite with better-sqlite3 |
-| HTTP client | Axios (frontend), undici (backend) |
-| Real-time features | Server-Sent Events for scanner/profit analysis |
-| Market API | warframe.market v2 + v1 stats |
-| Personal stats | Alecaframe stats API |
-| Bounty tracking | Real-time timers, price filtering/sorting |
-| Database | SQLite with migrations and price history |
+WMPersonal keeps legacy `/top` snapshots for comparison, but the current valuation model is based on stored full Warframe.market order books.
 
-## Project Structure
+Core concepts:
 
+- **Buy Now**: `executableAsk`, the lowest active sell from an `online` or `ingame` seller.
+- **Fair Market**: `competitiveEstimate`, the median of the cheapest competitive active seller cluster.
+- **Recent Sales**: matched 48h historical median when available.
+- **Best Bid**: `highestActiveBid`, the highest active buy order.
+- **Confidence**: explainable quality classification using freshness, active sellers/buyers, spread, suspicious lows, and historical agreement.
+
+Stored order books are configuration-aware: rank, subtype, charges, amber stars, and cyan stars are not mixed.
+
+## Rate Limiting And Scheduler
+
+All Warframe.market requests go through the backend queue. Full order-book collection is demand-driven and conservative. Opening Market, Scanner, Profit, or Relics views may record demand, but it does not trigger broad crawling.
+
+Useful environment variables:
+
+```text
+WMP_DB_PATH                 Optional SQLite database path
+WMP_MARKET_FRESH_SECONDS    Stored order book fresh threshold
+WMP_MARKET_AGING_SECONDS    Stored order book aging threshold
+WFM_JWT                     Optional Warframe.market JWT
+ALECA_USER_HASH             Optional Alecaframe user hash
+ALECA_TOKEN                 Optional Alecaframe token
+ALECA_NICK                  Optional in-game name
 ```
-WMPersonal/
-├── backend/
-│   ├── index.js          — Express server entry point
-│   ├── db.js             — SQLite setup and migrations
-│   ├── bounties.js       — Bounty location definitions and reward data
-│   ├── queue.js          — Rate-limited fetch queue (3 req/s)
-│   ├── sync.js           — Item list sync + price snapshot fetcher
-│   ├── scheduler.js      — Auto-refresh favourites every 5 min
-│   ├── .env              — Private keys (never committed)
-│   └── routes/
-│       ├── items.js      — GET /api/items
-│       ├── prices.js     — POST /api/prices/fetch, GET /api/prices/:slug
-│       ├── users.js      — GET /api/users/:slug/orders
-│       ├── favourites.js — CRUD + orders for favourite users
-│       ├── bounties.js   — GET /api/bounties, POST /api/bounties/refresh
-│       ├── stats.js      — v1 statistics endpoint wrapper
-│       ├── scanner.js    — SSE bulk scanner
-│       ├── profit.js     — SSE profit analyzer
-│       ├── timeanalysis.js — Time-based price analysis
-│       ├── customgroups.js — Custom group management
-│       └── alecaframe.js — Personal stats and trade history
-├── frontend/
-│   └── src/
-│       ├── App.jsx       — Main UI, all tabs
-│       ├── App.css       — Styles
-│       └── api.js        — Axios wrappers for all backend routes
-├── .gitignore
-└── README.md
+
+## Relics
+
+The Relics module imports structured relic reward data from WFCD `warframe-drop-data`, which is generated from Digital Extremes' official public drop tables. It calculates:
+
+```text
+EV(refinement) = sum(probability(reward | refinement) * reward trade value)
 ```
+
+Reward trade value uses the central semantic selector with resale/fair-market intent. Non-tradable rewards such as Forma Blueprint contribute `0p` trade EV.
+
+Details: [docs/relic-valuation.md](docs/relic-valuation.md)
 
 ## Setup
 
-### Requirements
-- Node.js v18+ (v24 recommended)
-- Warframe.market account (for JWT if needed)
-- Alecaframe installed (for personal stats tab)
+Requirements:
 
-### Install & Run
+- Node.js 18+; Node 24 works
+- SQLite database created by the backend on first run
 
-**Terminal 1 — Backend:**
+Install:
+
 ```bash
-cd backend
 npm install
-node index.js
-```
-
-**Terminal 2 — Frontend:**
-```bash
 cd frontend
 npm install
+```
+
+Run backend:
+
+```bash
+node backend/index.js
+```
+
+Run frontend:
+
+```bash
+cd frontend
 npm run dev
 ```
 
-Then open `http://localhost:5173` in your browser.
+Open `http://localhost:5173`.
 
-### Environment Variables
+## Tests
 
-Create `backend/.env`:
-```
-WFM_JWT=JWT eyJ...          # Optional: your warframe.market JWT token
-ALECA_USER_HASH=      # Your Alecaframe userHash (from Stats tab)
-ALECA_TOKEN=          # Your Alecaframe public token
-ALECA_NICK=           # Your in-game name
+```bash
+npm test
+cd frontend
+npm run build
 ```
 
-> ⚠️ Never commit `.env` to GitHub. It is already listed in `.gitignore`.
+## Internal APIs
 
-## API Reference
+- `POST /api/prices/fetch`: legacy `/top` snapshot fetch.
+- `GET /api/market-orders/:slug/analysis`: stored full-order valuation.
+- `POST /api/market-orders/:slug/refresh`: manual full order-book refresh.
+- `GET /api/market-orders/coverage`: stored market coverage summary.
+- `GET /api/relics`: relic list.
+- `GET /api/relics/:id`: relic EV valuation.
+- `POST /api/relics/sync`: import relic reward tables.
 
-### warframe.market
-- Base: `https://api.warframe.market/v2/`
-- Rate limit: 3 requests/second
-- Statistics: `https://api.warframe.market/v1/items/{slug}/statistics`
+## Limitations
 
-### Alecaframe
-- Base: `https://stats.alecaframe.com/api/`
-- Rate limit: 1 request/second
-- Docs: https://docs.alecaframe.com/api
-
-### Internal API Endpoints
-- `GET /api/bounties` — Fetch bounty locations with timers and reward prices
-- `POST /api/bounties/refresh` — Refresh bounty data from market snapshots
-- `GET /api/timeanalysis/:url_name` — Time-based price analysis for items
-- `GET /api/customgroups` — List custom item groups
-- `POST /api/customgroups` — Create new custom group
-
-## Key Concepts
-
-### Rate Limiting
-The backend queue (`queue.js`) spaces all warframe.market requests to max 3/sec. Never call the WM API directly from the frontend — always go through the backend.
-
-### Price Snapshots
-Every time you click an item or a scan runs, a row is inserted into `price_snapshots`. This builds up history over time. The more you use the app, the more historical data you accumulate.
-
-### Item Groups
-Items are classified into groups (Arcanes, Mods, Primary Sets, etc.) by name pattern matching in `scanner.js`. These groups are used by both the Scanner and Profit Analyzer tabs.
-
-### Profit Score
-`score = margin × avgDailyVolume`. A high score means an item has both a good buy/sell spread AND sells frequently — the combination that makes something worth trading.
-
-### Bounty Tracking
-The Bounty Tracker monitors all major Warframe bounty locations with real-time reset timers and market prices for rewards. Each location can be filtered and sorted independently by minimum/average price, name, or volume. Bounty data is refreshed from your local price snapshots database.
-
-**Supported Locations:**
-- Orb Vallis (4-hour cycle)
-- Plains of Eidolon (4-hour cycle)
-- Cambion Drift (Deimos) (4-hour cycle)
-- Sanctum Anatomica (4-hour cycle)
-- Venus (Orb Mother) (4-hour cycle)
-- Arbiters of Hexis (24-hour cycle)
-
-## Recent Updates
-
-### v2.x — Bounty Tracking & Enhanced Features
-- ✅ **Bounty Tracker**: Complete bounty monitoring system with live timers and market prices
-- ✅ **Advanced Filtering**: Per-location price filtering (min/avg) and sorting (name, price, volume)
-- ✅ **Time Analysis**: New tab for analyzing price trends over time
-- ✅ **Group Manager**: Custom item group management for scanning
-- ✅ **Enhanced UI**: Improved responsive design and user experience
-- ✅ **Real-time Updates**: Live bounty reset timers and automatic data refresh
-
-## GitHub
-
-Managed via GitHub Desktop. Commit after each working feature. Never commit `node_modules/` or `data.db` or `.env`.
+- Legacy `/top` pricing is retained for comparison and fallback.
+- Relic EV is solo expected trade value for opening an already-owned relic.
+- Relic farming/drop acquisition, squad Radshare EV, Ducat optimization, and trade recommendations are out of scope.
+- Stored order coverage starts low and improves only through explicit/manual/demand-driven collection.
+- Do not commit `node_modules`, `.env`, or SQLite database files.

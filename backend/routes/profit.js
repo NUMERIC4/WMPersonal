@@ -3,6 +3,9 @@ import { getDb } from "../db.js";
 import { queueFetch } from "../queue.js";
 import { fetchAndStoreStats } from "./stats.js";
 import { getItemsForGroup } from "../groups.js";
+import { buildProfitProfile } from "../marketAnalysis.js";
+import { recordMarketDemand } from "../marketScheduler.js";
+import { syncItemOrderBookFromOrders } from "../orderBookSync.js";
 
 const router = Router();
 const V2 = "https://api.warframe.market/v2";
@@ -11,57 +14,11 @@ let cancelFlag = false;
 // Fetch full orders for an item — goes through the rate-limited queue
 async function getFullOrders(url_name) {
   try {
-    const json = await queueFetch(`${V2}/orders/item/${url_name}`);
+    const json = await queueFetch(`${V2}/orders/item/${url_name}`, { priority: "normal" });
     return json.data ?? [];
   } catch (_) {
-    return [];
+    return null;
   }
-}
-
-function platPerKStanding(value, standingCost) {
-  if (value === null || value === undefined || !standingCost) return null;
-  return Math.round((value * 1000 / standingCost) * 100) / 100;
-}
-
-// Build profit profile for a single item+rank combo
-function buildProfile(url_name, item_name, rank, maxRank, standingCost, orders, stats90) {
-  const sells   = orders.filter(o => o.type === "sell" && (o.rank ?? null) === rank);
-  const buys    = orders.filter(o => o.type === "buy"  && (o.rank ?? null) === rank);
-  const onSell  = sells.filter(o => o.user?.status === "ingame").map(o => o.platinum).sort((a,b) => a-b);
-  const onBuy   = buys.filter(o  => o.user?.status === "ingame").map(o => o.platinum).sort((a,b) => b-a);
-  const offSell = sells.filter(o => o.user?.status !== "ingame").map(o => o.platinum).sort((a,b) => a-b);
-
-  const minSell = onSell[0]  ?? offSell[0] ?? null;
-  const maxBuy  = onBuy[0]   ?? null;
-  const margin  = minSell !== null && maxBuy !== null ? minSell - maxBuy : null;
-
-  const totalVol90  = stats90.reduce((s, r) => s + (r.volume ?? 0), 0);
-  const avgDaily    = stats90.length ? totalVol90 / stats90.length : 0;
-  const medians     = stats90.map(r => r.median).filter(Boolean);
-  const avgMedian   = medians.length ? medians.reduce((s,v) => s+v,0) / medians.length : null;
-
-  // Sell speed: avg trades per day over last 90d
-  const sellSpeed = Math.round(avgDaily * 10) / 10;
-
-  // Score: margin * sellSpeed (higher = more profitable & liquid)
-  const score = margin !== null && sellSpeed > 0 ? Math.round(margin * sellSpeed) : 0;
-
-  return {
-    url_name, item_name, rank, maxRank,
-    standingCost,
-    minSell, maxBuy, margin,
-    minSellPerKStanding: platPerKStanding(minSell, standingCost),
-    avgMedianPerKStanding: platPerKStanding(avgMedian, standingCost),
-    marginPerKStanding: platPerKStanding(margin, standingCost),
-    offlineMinSell: offSell[0] ?? null,
-    onlineSellers:  onSell.length,
-    onlineBuyers:   onBuy.length,
-    offlineSellers: offSell.length,
-    vol90d:         totalVol90,
-    avgDaily90d:    sellSpeed,
-    avgMedian90d:   avgMedian ? Math.round(avgMedian * 10) / 10 : null,
-    score,
-  };
 }
 
 // POST /api/profit/scan { group, limit }
@@ -94,10 +51,17 @@ router.get("/scan", async (req, res) => {
 
     try {
       // Fetch stats and orders in parallel
-      const [_, orders] = await Promise.all([
+      const [_, fetchedOrders] = await Promise.all([
         fetchAndStoreStats(item.url_name).catch(() => {}),
         getFullOrders(item.url_name),
       ]);
+      const orders = fetchedOrders ?? [];
+      if (fetchedOrders) {
+        try {
+          recordMarketDemand(item.url_name, "profit");
+          await syncItemOrderBookFromOrders(item.url_name, fetchedOrders);
+        } catch (_) {}
+      }
 
       const ranks = [...new Set(orders.map(o => o.rank ?? null))];
       const db2 = getDb();
@@ -107,7 +71,7 @@ router.get("/scan", async (req, res) => {
           "SELECT * FROM item_statistics WHERE url_name=? AND period='90d' AND (rank=? OR (rank IS NULL AND ? IS NULL)) ORDER BY datetime DESC LIMIT 30"
         ).all(item.url_name, rank, rank);
 
-        const profile = buildProfile(
+        const profile = buildProfitProfile(
           item.url_name,
           item.item_name,
           rank,
@@ -115,6 +79,12 @@ router.get("/scan", async (req, res) => {
           item.standing_cost,
           orders,
           stats90
+        );
+        console.debug(
+          `profit valuation ${item.url_name} rank ${rank ?? "default"}: ` +
+          `acquire=${profile.valuationSources?.acquisition?.source ?? profile.valuationSources?.acquisition?.reason}, ` +
+          `resale=${profile.valuationSources?.resale?.source ?? profile.valuationSources?.resale?.reason}, ` +
+          `liquidate=${profile.valuationSources?.liquidation?.source ?? profile.valuationSources?.liquidation?.reason}`
         );
         if (profile.margin !== null || profile.vol90d > 0) profiles.push(profile);
       }
